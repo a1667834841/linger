@@ -73,6 +73,11 @@ type codexOperation struct {
 	// failureCode is a public failure code from a structured Codex signal.
 	failureCode string
 	itemsDone   map[string]bool
+	// commands holds in-progress commandExecution item IDs. A running command
+	// is work, not inactivity, so the watchdog suspends while any is open. The
+	// set is per-Operation, so it never carries into the next Run on a
+	// resident process.
+	commands    map[string]struct{}
 	answer      string
 	liveUsage   *codexUsage
 	lastUsage   *codexUsage
@@ -95,7 +100,7 @@ func newCodexOperation(proc *codexProcess, profile Profile, spec RunSpec, prompt
 		attempt: attempt, startedAt: time.Now(), fresh: fresh, reused: reused,
 		reviewed: spec.CodexPermissionHook != nil && spec.CodexPermissionHook.ReviewPermissions, bridge: spec.HumanInteraction,
 		activity: make(chan string, codexActivityBuffer), terminal: make(chan struct{}),
-		events: make(chan Event, codexEventBuffer), itemsDone: map[string]bool{},
+		events: make(chan Event, codexEventBuffer), itemsDone: map[string]bool{}, commands: map[string]struct{}{},
 		steers: map[string]chan struct{}{}, requests: newModelRequestClock(GranularityItem),
 	}
 }
@@ -352,6 +357,12 @@ func (op *codexOperation) contextFailure(ctx context.Context) codexFailure {
 	return codexFailure{status: statusAborted, err: "execution cancelled"}
 }
 
+func (op *codexOperation) commandRunning() bool {
+	op.mu.Lock()
+	defer op.mu.Unlock()
+	return len(op.commands) > 0
+}
+
 // waitTurn waits for turn/completed under the first-progress and silence
 // budgets. A terminal already received wins over everything else.
 func (op *codexOperation) waitTurn(ctx context.Context) codexFailure {
@@ -373,7 +384,7 @@ func (op *codexOperation) waitTurn(ctx context.Context) codexFailure {
 			first.Stop()
 		}
 	}()
-	waiting := func() bool { return op.bridge != nil && op.bridge.Waiting() }
+	waiting := func() bool { return op.bridge != nil && op.bridge.Waiting() || op.commandRunning() }
 	for {
 		select {
 		case <-op.terminal:

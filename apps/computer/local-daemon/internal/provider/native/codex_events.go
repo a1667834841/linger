@@ -210,6 +210,8 @@ func (op *codexOperation) project(method string, n *codexNotification) {
 	case "item/reasoning/textDelta":
 		op.activityNote(method + ":reasoning:" + n.ItemID)
 		op.emit(Event{Kind: EventReasoning, ID: n.ItemID})
+	case "item/commandExecution/outputDelta", "item/agentMessage/delta":
+		op.activityNote(method + ":" + n.ItemID)
 	case "item/started", "item/completed":
 		op.item(method, &n.Item)
 	}
@@ -240,6 +242,7 @@ func (op *codexOperation) turnFinished(n *codexNotification) {
 	}
 	op.terminalSeen = true
 	op.steerable = false
+	clear(op.commands)
 	status := n.Turn.Status
 	if status == "failed" {
 		message := "Codex turn failed"
@@ -297,6 +300,15 @@ func (op *codexOperation) item(method string, item *codexItem) {
 	}
 	op.activityNote(note)
 	started := method == "item/started"
+	if item.Type == "commandExecution" && item.ID != "" {
+		op.mu.Lock()
+		if started {
+			op.commands[item.ID] = struct{}{}
+		} else {
+			delete(op.commands, item.ID)
+		}
+		op.mu.Unlock()
+	}
 	if codexToolItem(item.Type) {
 		if started {
 			op.requests.call("")

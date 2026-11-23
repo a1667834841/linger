@@ -179,6 +179,104 @@ func TestCodexSilenceTimeout(t *testing.T) {
 	}
 }
 
+// Work in progress that outlasts the silence budget is not inactivity; a stall
+// after it finishes still is.
+func TestCodexSilenceBudgetActivity(t *testing.T) {
+	const silence = 150 * time.Millisecond
+	pause := map[string]any{"method": "fake/pause", "ms": 50}
+	repeat := func(n int, build func(int) []map[string]any) []map[string]any {
+		var items []map[string]any
+		for i := range n {
+			items = append(items, build(i)...)
+		}
+		return items
+	}
+	command := map[string]any{"id": "c1", "type": "commandExecution", "command": "make test", "status": "inProgress"}
+	commandDone := map[string]any{"id": "c1", "type": "commandExecution", "command": "make test", "status": "completed", "aggregatedOutput": "ok", "exitCode": 0}
+	command2 := map[string]any{"id": "c2", "type": "commandExecution", "command": "make lint", "status": "inProgress"}
+	command2Done := map[string]any{"id": "c2", "type": "commandExecution", "command": "make lint", "status": "completed", "aggregatedOutput": "ok", "exitCode": 0}
+	final := codexAgentMessage("m-final", "done", "final_answer")
+	cases := []struct {
+		name  string
+		items []map[string]any
+		stall bool
+	}{
+		{name: "command_streaming_output", items: append(append([]map[string]any{
+			codexItemNotice("item/started", "$THREAD", "$TURN", command),
+		}, repeat(10, func(i int) []map[string]any {
+			return []map[string]any{pause, {"method": "item/commandExecution/outputDelta", "params": map[string]any{
+				"threadId": "$THREAD", "turnId": "$TURN", "itemId": "c1", "delta": "line " + strconv.Itoa(i) + "\n"}}}
+		})...), codexItemNotice("item/completed", "$THREAD", "$TURN", commandDone), final)},
+		{name: "silent_command_in_progress", items: []map[string]any{
+			codexItemNotice("item/started", "$THREAD", "$TURN", command),
+			{"method": "fake/pause", "ms": 500},
+			codexItemNotice("item/completed", "$THREAD", "$TURN", commandDone), final,
+		}},
+		{name: "overlapping_commands", items: []map[string]any{
+			codexItemNotice("item/started", "$THREAD", "$TURN", command),
+			codexItemNotice("item/started", "$THREAD", "$TURN", command2),
+			codexItemNotice("item/completed", "$THREAD", "$TURN", commandDone),
+			{"method": "fake/pause", "ms": 500},
+			codexItemNotice("item/completed", "$THREAD", "$TURN", command2Done), final,
+		}},
+		{name: "stall_after_command_completed", stall: true, items: []map[string]any{
+			codexItemNotice("item/started", "$THREAD", "$TURN", command),
+			codexItemNotice("item/completed", "$THREAD", "$TURN", commandDone),
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			turn := codexFakeTurn{Items: tc.items, Status: "completed"}
+			if tc.stall {
+				turn = codexFakeTurn{Items: tc.items, Stall: true}
+			}
+			fake := newCodexFake(t, []codexFakeTurn{turn}, nil)
+			spec := fake.spec()
+			spec.SilenceBudget = silence
+			spec.FirstProgressBudget = time.Minute
+			out, _ := codexDrain(t, fake.runtime(nil), "go", spec)
+			if tc.stall {
+				if out.Status != statusTimeout || !strings.HasPrefix(out.Error, CodexSemanticInactivityMarker+" after ") {
+					t.Fatalf("outcome = %+v", out)
+				}
+				return
+			}
+			if out.Status != statusCompleted || out.Output != "done" {
+				t.Fatalf("outcome = %+v", out)
+			}
+		})
+	}
+}
+
+// A command a finished turn never completed does not suspend the watchdog for
+// the next Run on the same resident process.
+func TestCodexCommandSetDoesNotLeakAcrossRuns(t *testing.T) {
+	command := map[string]any{"id": "c1", "type": "commandExecution", "command": "make test", "status": "inProgress"}
+	fake := newCodexFake(t, []codexFakeTurn{
+		{Status: "completed", Items: []map[string]any{
+			codexItemNotice("item/started", "$THREAD", "$TURN", command),
+			codexAgentMessage("m", "ok", "final_answer"),
+		}},
+		{Stall: true},
+	}, nil)
+	rt := fake.runtime(nil)
+	spec := fake.spec()
+	spec.SilenceBudget = 150 * time.Millisecond
+	spec.FirstProgressBudget = time.Minute
+	out, _ := codexDrain(t, rt, "one", spec)
+	if out.Status != statusCompleted {
+		t.Fatalf("first = %+v", out)
+	}
+	spec.ResumeID = out.SessionID
+	out, events := codexDrain(t, rt, "two", spec)
+	if out.Status != statusTimeout || !strings.HasPrefix(out.Error, CodexSemanticInactivityMarker+" after ") {
+		t.Fatalf("second = %+v", out)
+	}
+	if codexReused(events) != "true" || fake.launchCount() != 1 {
+		t.Fatalf("reused = %q launches = %d", codexReused(events), fake.launchCount())
+	}
+}
+
 func TestCodexStartupStallKillsTree(t *testing.T) {
 	for _, method := range []string{"initialize", "thread/start"} {
 		t.Run(method, func(t *testing.T) {
