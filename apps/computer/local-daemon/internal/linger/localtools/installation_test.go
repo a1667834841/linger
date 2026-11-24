@@ -274,3 +274,60 @@ func TestInstalledToolsInTheDesktopLayout(t *testing.T) {
 		t.Fatalf("desktop installation: %+v %v", result, err)
 	}
 }
+
+// V2 Desktop shares a single Node.js 26 runtime via LINGER_TOOLS_NODE_PATH and
+// can point the daemon at an externalized updatable computer-tools directory.
+func TestInstalledToolsSupportSharedNodeAndExternalToolsEnv(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	externalTools := filepath.Join(root, "store", "computer-tools-abc123")
+	entries := append([]string{"node_modules/@playwright/mcp/cli.js", "extensions/pi-mcp.mjs"}, quickJSAssets...)
+	assets := make([]map[string]any, 0, len(entries))
+	for _, name := range entries {
+		file := filepath.Join(externalTools, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte("fixture"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		assets = append(assets, map[string]any{"path": name, "size_bytes": 7})
+	}
+	manifest, err := json.Marshal(map[string]any{"schema_version": 1, "versions": map[string]string{"playwright": "0.0.83", "pi": "1.2.0", "cua": "0.35.4", "quickjs": "3.6.2"}, "playwright_entry": entries[0], "pi_extension": entries[1], "assets": assets})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(externalTools, "manifest.json"), manifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sharedNode := filepath.Join(root, "infra", "node", "bin", "node")
+	if runtime.GOOS == "windows" {
+		sharedNode += ".exe"
+	}
+	if err := os.MkdirAll(filepath.Dir(sharedNode), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sharedNode, []byte("fixture"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("LINGER_COMPUTER_TOOLS_DIR", externalTools)
+	t.Setenv("LINGER_TOOLS_NODE_PATH", sharedNode)
+
+	executable := filepath.Join(root, "store", "daemon", "linger-computer-daemon")
+	if got := ToolsDirectory(executable); got != externalTools {
+		t.Fatalf("ToolsDirectory override = %s, want %s", got, externalTools)
+	}
+	result, err := Installed(executable)
+	if err != nil || result == nil {
+		t.Fatalf("externalized installation failed: %+v %v", result, err)
+	}
+	if result.NodePath != sharedNode {
+		t.Fatalf("NodePath = %s, want shared node %s", result.NodePath, sharedNode)
+	}
+	if result.PlaywrightEntry != filepath.Join(externalTools, filepath.FromSlash(entries[0])) {
+		t.Fatalf("PlaywrightEntry = %s", result.PlaywrightEntry)
+	}
+}

@@ -27,10 +27,16 @@ export interface NativeRuntimeFile {
 export interface NativeRuntime {
   schema: number;
   target: string;
-  sourceCommit: string;
-  sourceArchiveSha256: string;
+  sourceCommit?: string;
+  sourceArchiveSha256?: string;
+  /** V2 modular bundle identifiers (decoupled from the 45 MB source archive). */
+  artifactId?: string;
+  nativeDepsHash?: string;
   files: Record<string, NativeRuntimeFile>;
 }
+
+/** V2 runtime schema for decoupled web / node-services / node-native-deps bundles. */
+export const BUNDLE_RUNTIME_SCHEMA = 2;
 
 // Entries the services start from; a runtime without them is not one.
 const ENTRIES = [
@@ -50,13 +56,19 @@ const safePath = (file: string) =>
 
 export function parseNativeRuntime(value: unknown): NativeRuntime {
   const manifest = value as NativeRuntime;
+  const isV1 =
+    manifest?.schema === NATIVE_RUNTIME_SCHEMA &&
+    /^[0-9a-f]{40}$/.test(manifest.sourceCommit ?? "") &&
+    /^[0-9a-f]{64}$/.test(manifest.sourceArchiveSha256 ?? "");
+  const isV2 =
+    manifest?.schema === BUNDLE_RUNTIME_SCHEMA &&
+    typeof manifest.artifactId === "string" &&
+    manifest.artifactId.length > 0;
   const valid =
     !!manifest &&
     typeof manifest === "object" &&
-    manifest.schema === NATIVE_RUNTIME_SCHEMA &&
+    (isV1 || isV2) &&
     typeof manifest.target === "string" &&
-    /^[0-9a-f]{40}$/.test(manifest.sourceCommit ?? "") &&
-    /^[0-9a-f]{64}$/.test(manifest.sourceArchiveSha256 ?? "") &&
     !!manifest.files &&
     typeof manifest.files === "object" &&
     Object.entries(manifest.files).every(
@@ -69,19 +81,46 @@ export function parseNativeRuntime(value: unknown): NativeRuntime {
         Number.isSafeInteger(item.bytes) &&
         item.bytes >= 0,
     ) &&
-    ENTRIES.every((entry) => entry in manifest.files);
+    (!isV1 || ENTRIES.every((entry) => entry in manifest.files));
   if (!valid) throw new Error("Invalid Native runtime manifest.");
   return {
     schema: manifest.schema,
     target: manifest.target,
-    sourceCommit: manifest.sourceCommit,
-    sourceArchiveSha256: manifest.sourceArchiveSha256,
+    ...(manifest.sourceCommit ? { sourceCommit: manifest.sourceCommit } : {}),
+    ...(manifest.sourceArchiveSha256
+      ? { sourceArchiveSha256: manifest.sourceArchiveSha256 }
+      : {}),
+    ...(manifest.artifactId ? { artifactId: manifest.artifactId } : {}),
+    ...(manifest.nativeDepsHash
+      ? { nativeDepsHash: manifest.nativeDepsHash }
+      : {}),
     files: Object.fromEntries(
       Object.entries(manifest.files).map(([file, { bytes, sha256 }]) => [
         file,
         { bytes, sha256 },
       ]),
     ),
+  };
+}
+
+/**
+ * Builds the process environment that wires a decoupled V2 node-services JS
+ * bundle directory (`store/node-services/<id>`) to its shared native dependency
+ * cache (`infra/node-deps/<hash>/node_modules`) and optional hot-loaded prompts.
+ */
+export function resolveBundleRuntimeEnv(options: {
+  readonly nodeDepsDir: string;
+  readonly promptsDir?: string;
+  readonly baseEnv?: Readonly<Record<string, string | undefined>>;
+}): Record<string, string> {
+  const depsNodeModules = path.join(options.nodeDepsDir, "node_modules");
+  const existingNodePath = options.baseEnv?.NODE_PATH;
+  const nodePath = existingNodePath
+    ? `${depsNodeModules}${path.delimiter}${existingNodePath}`
+    : depsNodeModules;
+  return {
+    NODE_PATH: nodePath,
+    ...(options.promptsDir ? { LINGER_PROMPTS_DIR: options.promptsDir } : {}),
   };
 }
 

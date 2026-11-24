@@ -15,7 +15,41 @@ from archive import sha256
 DESKTOP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NATIVE = os.path.join(DESKTOP, "dist", "installer", "native")
 SOURCE = os.path.join(DESKTOP, "dist", "installer", "source")
+SEED = os.path.join(DESKTOP, "dist", "seed")
 TEAMHUB_COMMANDS = ("teamhub", "migrate", "account")
+V2_SEED_MODULES = ("web", "node-services", "node-native-deps", "teamhub", "computer-daemon", "installer", "skills-prompts")
+
+
+def check_seed_manifest(target, seed_dir=SEED):
+    """Validates a V2 offline seed folder (`dist/seed/seed-manifest.json`).
+
+    V2 shells ship prebuilt modular bundles instead of a 45 MB source archive,
+    so every referenced archive is verified directly by size and sha256 without
+    requiring `sourceArchiveSha256`.
+    """
+    manifest_path = os.path.join(seed_dir, "seed-manifest.json")
+    if not os.path.exists(manifest_path):
+        return None
+    with open(manifest_path) as file:
+        manifest = json.load(file)
+    if manifest.get("schema") != 1:
+        sys.exit(f"{manifest_path}: unsupported seed manifest schema {manifest.get('schema')}")
+    if manifest.get("target") != target:
+        sys.exit(f"{manifest_path}: seed target is {manifest.get('target')}, expected {target}")
+    bundles = manifest.get("bundles")
+    if not isinstance(bundles, dict):
+        sys.exit(f"{manifest_path}: missing bundles map")
+    for name in V2_SEED_MODULES:
+        item = bundles.get(name)
+        if not isinstance(item, dict) or not item.get("file"):
+            sys.exit(f"{manifest_path}: missing required seed bundle '{name}'")
+        rel = item["file"]
+        if rel.startswith("/") or ".." in rel.split("/"):
+            sys.exit(f"{manifest_path}: unsafe bundle path '{rel}'")
+        full = os.path.join(seed_dir, rel)
+        if not matches(full, item):
+            sys.exit(f"{full} does not match {manifest_path} for '{name}'")
+    return manifest
 MACHO_MAGIC = {b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe"}
 
 

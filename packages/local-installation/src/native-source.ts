@@ -25,7 +25,11 @@ import {
   prepareNativeVoiceTools,
 } from "./native-dependencies.js";
 import { readLiveKitSettings, startNativeLiveKit } from "./native-livekit.js";
-import { checkNativeRuntime } from "./native-runtime.js";
+import { checkNativeRuntime, resolveBundleRuntimeEnv } from "./native-runtime.js";
+import {
+  resolveSafeHomePath,
+  type LocalReleaseDescriptor,
+} from "./release-descriptor.js";
 import { checkTeamhubBinaries } from "./teamhub-binaries.js";
 import { sourceRegion } from "@linger/service-kit";
 import { npmRegistryEnvironment } from "./npm-registry.js";
@@ -91,6 +95,109 @@ export const nativeServices = [
   "livekit",
   "postgres",
 ] as const;
+
+export type BundleNativeOperation =
+  | "web"
+  | "node-services"
+  | "teamhub"
+  | "migrate"
+  | "account";
+
+export interface PlannedBundleCommand {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly cwd: string;
+  readonly env: Readonly<Record<string, string>>;
+}
+
+/**
+ * Resolves the launch command for a local service directly from a V2
+ * LocalReleaseDescriptor under `<LINGER_HOME>`, eliminating any runtime
+ * dependency on the legacy 45 MB source archive checkout.
+ */
+export function planBundleNativeCommand(
+  operation: BundleNativeOperation,
+  home: string,
+  release: LocalReleaseDescriptor,
+  options: {
+    readonly platform?: NodeJS.Platform;
+    readonly baseEnv?: Readonly<Record<string, string | undefined>>;
+    readonly webControlToken?: string;
+  } = {},
+): PlannedBundleCommand {
+  const platform = options.platform ?? process.platform;
+  const exe = (name: string) => (platform === "win32" ? `${name}.exe` : name);
+  const nodeBin = path.join(
+    resolveSafeHomePath(home, release.infra.node),
+    "bin",
+    exe("node"),
+  );
+  const nodeDepsDir = resolveSafeHomePath(home, release.infra.nodeDeps);
+  const webDir = resolveSafeHomePath(home, release.modules.web.path);
+  const nodeServicesDir = resolveSafeHomePath(
+    home,
+    release.modules["node-services"].path,
+  );
+  const teamhubDir = resolveSafeHomePath(home, release.modules.teamhub.path);
+  const skillsPromptsDir = resolveSafeHomePath(
+    home,
+    release.modules["skills-prompts"].path,
+  );
+
+  switch (operation) {
+    case "web":
+      return {
+        command: nodeBin,
+        args: [path.join(webDir, "static-host.mjs")],
+        cwd: webDir,
+        env: {
+          LINGER_ALLOWED_WEB_ROOT: path.join(path.resolve(home), "store", "web"),
+          ...(options.webControlToken
+            ? { LINGER_WEB_CONTROL_TOKEN: options.webControlToken }
+            : {}),
+        },
+      };
+    case "node-services":
+      return {
+        command: nodeBin,
+        args: [
+          "--conditions=linger-production",
+          path.join(nodeServicesDir, "dist", "supervisor.js"),
+          "--compiled",
+        ],
+        cwd: path.resolve(home),
+        env: resolveBundleRuntimeEnv({
+          nodeDepsDir,
+          promptsDir: path.join(skillsPromptsDir, "prompts"),
+          baseEnv: options.baseEnv,
+        }),
+      };
+    case "teamhub":
+      return {
+        command: path.join(teamhubDir, exe("teamhub")),
+        args: [],
+        cwd: teamhubDir,
+        env: {
+          GIN_MODE: "release",
+          TEAMHUB_SKILLS_DIR: path.join(skillsPromptsDir, "skills"),
+        },
+      };
+    case "migrate":
+      return {
+        command: path.join(teamhubDir, exe("migrate")),
+        args: [],
+        cwd: teamhubDir,
+        env: {},
+      };
+    case "account":
+      return {
+        command: path.join(teamhubDir, exe("account")),
+        args: [],
+        cwd: teamhubDir,
+        env: {},
+      };
+  }
+}
 /** Marks a native service whose stop failed without a more specific code. */
 export const NATIVE_SERVICE_STOP_FAILED = "NATIVE_SERVICE_STOP_FAILED";
 function requireNative(instance: Instance) {
