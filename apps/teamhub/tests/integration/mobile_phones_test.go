@@ -200,7 +200,7 @@ func TestMobilePhonePairsActsAndIsRemoved(t *testing.T) {
 	settings := config.ForTest()
 	secret := make([]byte, 32)
 	_, _ = rand.Read(secret)
-	settings.Mobile = config.MobileConfig{StaticKeySecret: secret, LANAddress: "127.0.0.1:0"}
+	settings.Mobile = config.MobileConfig{StaticKeySecret: secret, LANAddress: "127.0.0.1:0", PushServiceURL: "https://push.example.com"}
 	env := newPersistentSessionEnvWithConfig(t, settings)
 	alice := env.login("alice", alicePassword)
 
@@ -272,6 +272,15 @@ func TestMobilePhonePairsActsAndIsRemoved(t *testing.T) {
 	}
 	if status, _, _ := phone.do(http.MethodPost, "/v0/me/phone-pairings", nil); status != http.StatusNotFound {
 		t.Fatalf("pairing administration from a phone = %d", status)
+	}
+	// A phone may not point the computer into its own network.
+	private := map[string]any{"url": "ws://127.0.0.1:7787"}
+	if status, body, _ := phone.do(http.MethodPost, "/v0/mobile/relays", private); status != http.StatusForbidden || !strings.Contains(string(body), "RELAY_PRIVATE_FROM_PHONE") {
+		t.Fatalf("private relay from the phone = %d %s", status, body)
+	}
+	elsewhere := map[string]any{"grant": "sealed-grant", "service_url": "https://push.attacker.example"}
+	if status, body, _ := phone.do(http.MethodPut, "/v0/me/phone/push-grant", elsewhere); status != http.StatusBadRequest || !strings.Contains(string(body), "PUSH_SERVICE_NOT_ALLOWED") {
+		t.Fatalf("push grant naming another service = %d %s", status, body)
 	}
 	grant := map[string]any{"grant": "sealed-grant", "service_url": "https://push.example.com"}
 	if status, body, _ := phone.do(http.MethodPut, "/v0/me/phone/push-grant", grant); status != http.StatusNoContent {
