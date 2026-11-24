@@ -250,7 +250,9 @@ Gateway and runs Agents. The daemon exits with the app.
   new folder (`details.source`) and the origin answers does it record that
   folder and prune the older one; otherwise the older services keep running
   from their folder, the record keeps naming it, and the start failure page's
-  Retry moves them again. An app older than the recorded version
+  Retry moves them again. A prune never removes a folder a running process
+  still starts from (`foldersInUse`; when processes cannot be listed, it
+  removes nothing) and logs `local_server.source_in_use` instead. An app older than the recorded version
   (a downgrade) leaves the services on their newer source and logs
   `local_server.source_newer_than_app`. When local models fail to come back on a
   resume, the installer still brings up the services and reports
@@ -382,7 +384,15 @@ Gateway and runs Agents. The daemon exits with the app.
   redacted `error` bounded to 500 chars with query/hash stripped). A resume
   whose saved BYOK gateway did not come back still succeeds and logs
   `local_server.byok_gateway_unavailable` (`code`, `message`); the Computer
-  mounts the gateway again before the next Run on it.
+  mounts the gateway again before the next Run on it. Once ready, a server
+  the window shows can still stop: its supervisor restarts it, and the
+  desktop resumes it like a launch when it does not answer
+  (`local_server.unreachable_resume` with `trigger`): at once on
+  `local-server.retry`, and after `UNREACHABLE_GRACE_MS` (longer than the
+  supervisor's restart delays) on `local-server.unreachable` (WindowManager
+  emits it when it shows `offline.html` for a failed load) or the
+  `WATCH_MS` watch. Those two resume at most once a minute; a resume that
+  fails shows the start failure page as on launch.
 - `src/main/voice-window.ts`: the floating voice window. Electron cannot open
   Document Picture-in-Picture windows, so the SPA opens a small native window
   with `window.open("")` under the target `linger-voice-window-<n>`

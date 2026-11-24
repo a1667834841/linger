@@ -49,6 +49,8 @@ function setupResumeFixture(
     ) => Promise<LocalServerIdentity>;
     proveServer?: (server: LocalServerIdentity) => Promise<void>;
     resolveProxy?: (url: string) => Promise<string>;
+    watchMs?: number;
+    unreachableGraceMs?: number;
   } = {},
 ) {
   const root = tempDirectory();
@@ -106,6 +108,10 @@ function setupResumeFixture(
         throw new Error("offline");
       }) as typeof fetch),
     resolveProxy: options.resolveProxy,
+    ...(options.watchMs ? { watchMs: options.watchMs } : {}),
+    ...(options.unreachableGraceMs
+      ? { unreachableGraceMs: options.unreachableGraceMs }
+      : {}),
   });
 
   const host = new ModuleHost(
@@ -136,6 +142,7 @@ function setupResumeFixture(
     installerDirectory,
     module,
     host,
+    bus,
     logs,
     setServer,
     showStarting,
@@ -560,5 +567,137 @@ describe("LocalServerModule resume coordination", () => {
       false,
     );
     await f.host.stop("quit");
+  });
+
+  describe("a ready server that stops answering", () => {
+    // Counts its resumes, and succeeds at once.
+    const counting = `
+      if (process.argv.includes("--resume"))
+        require("node:fs").appendFileSync(require("node:path").join(__dirname, "runs"), "x");
+      process.stdout.write(JSON.stringify({ code: 0, details: { origin: "http://localhost:3000" } }) + "\\n");
+    `;
+    const runs = (f: { installerDirectory: string }) => {
+      try {
+        return readFileSync(path.join(f.installerDirectory, "runs"), "utf8")
+          .length;
+      } catch {
+        return 0;
+      }
+    };
+    const answering = () => {
+      const state = { up: true };
+      const probe = (async () => {
+        if (!state.up) throw new Error("offline");
+        return new Response(null, { status: 200 });
+      }) as typeof fetch;
+      return { state, fetch: probe };
+    };
+    const recoveries = (f: {
+      logs: Array<{ event: string; fields?: unknown }>;
+    }) =>
+      f.logs
+        .filter((entry) => entry.event === "local_server.unreachable_resume")
+        .map((entry) => entry.fields);
+
+    it("Retry resumes it again although the last resume succeeded", async () => {
+      const server = answering();
+      const f = setupResumeFixture(counting, { fetch: server.fetch });
+      await f.host.start();
+      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      expect(runs(f)).toBe(1);
+      server.state.up = false;
+      f.bus.emit("local-server.retry");
+      await vi.waitFor(() => expect(runs(f)).toBe(2));
+      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      expect(recoveries(f)).toEqual([{ trigger: "retry" }]);
+      expect(f.showStarting).toHaveBeenCalledOnce();
+      await f.host.stop("quit");
+    });
+
+    it("Retry leaves a ready server that answers alone", async () => {
+      const server = answering();
+      const f = setupResumeFixture(counting, { fetch: server.fetch });
+      await f.host.start();
+      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      f.bus.emit("local-server.retry");
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(runs(f)).toBe(1);
+      expect(recoveries(f)).toEqual([]);
+      await f.host.stop("quit");
+    });
+
+    it("a failed load resumes it once its supervisor had time to restart it", async () => {
+      const server = answering();
+      const f = setupResumeFixture(counting, {
+        fetch: server.fetch,
+        unreachableGraceMs: 100,
+      });
+      await f.host.start();
+      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      server.state.up = false;
+      f.bus.emit("local-server.unreachable");
+      // Further failed loads while it waits change nothing.
+      f.bus.emit("local-server.unreachable");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(runs(f)).toBe(1);
+      await vi.waitFor(() => expect(runs(f)).toBe(2));
+      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      expect(recoveries(f)).toEqual([{ trigger: "load_failed" }]);
+      await f.host.stop("quit");
+    });
+
+    it("a server its supervisor brings back within the grace is not resumed", async () => {
+      const server = answering();
+      const f = setupResumeFixture(counting, {
+        fetch: server.fetch,
+        unreachableGraceMs: 150,
+      });
+      await f.host.start();
+      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      server.state.up = false;
+      f.bus.emit("local-server.unreachable");
+      setTimeout(() => {
+        server.state.up = true;
+      }, 50);
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(runs(f)).toBe(1);
+      expect(recoveries(f)).toEqual([]);
+      await f.host.stop("quit");
+    });
+
+    it("the watch resumes it while no window load fails, at most once a minute", async () => {
+      const server = answering();
+      const f = setupResumeFixture(counting, {
+        fetch: server.fetch,
+        watchMs: 30,
+        unreachableGraceMs: 30,
+      });
+      await f.host.start();
+      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(runs(f)).toBe(1);
+      server.state.up = false;
+      await vi.waitFor(() => expect(runs(f)).toBe(2));
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(runs(f)).toBe(2);
+      expect(recoveries(f)).toEqual([{ trigger: "watch" }]);
+      await f.host.stop("quit");
+    });
+
+    it("a stop ends the watch and a pending recovery", async () => {
+      const server = answering();
+      const f = setupResumeFixture(counting, {
+        fetch: server.fetch,
+        watchMs: 30,
+        unreachableGraceMs: 100,
+      });
+      await f.host.start();
+      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      server.state.up = false;
+      f.bus.emit("local-server.unreachable");
+      await f.host.stop("quit");
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(runs(f)).toBe(1);
+    });
   });
 });
