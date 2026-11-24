@@ -198,6 +198,14 @@ Gateway and runs Agents. The daemon exits with the app.
   as the setup window opens and again when that location changes, including
   after a failed install). Checks keep their tool cache in the default home,
   leave alternative locations untouched, and never migrate installations.
+  On Windows, `chooseLocation` (and `#install` before unpacking a custom
+  location) also pre-checks candidate folders with `windowsPrivateLocation`
+  without creating or mutating them; selecting a drive root always targets its
+  `Linger` subfolder unless it already holds an installation. When
+  `UNSAFE_PARENT_ACCESS` refuses a nested folder or a drive-root folder whose
+  volume root grants other accounts (such as `Everyone`) Full Control, the
+  setup page surfaces localized recovery guidance both under Customize and on
+  the failed installation step.
   In the report, `local-models` is the planned model served by Pi, shown with the model,
   GPU, memory and download (the card's memory is the whole stack's, so
   "with its services"); otherwise the named runtime, with why there is no

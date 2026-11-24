@@ -4,6 +4,7 @@ import { PassThrough } from "node:stream";
 import { expect, it, vi } from "vitest";
 import {
   createWindowsPrivateClient,
+  windowsPrivateLocation,
   windowsPrivatePath,
   windowsPrivateRefusal,
   WINDOWS_PRIVATE_PATH_UNSAFE,
@@ -111,6 +112,34 @@ it("ignores inherit-only ACEs only for effective ancestor permissions", () => {
   expect(WINDOWS_PRIVATE_WORKER_SCRIPT).toContain(
     "$replace = 'DeleteSubdirectoriesAndFiles,ChangePermissions,TakeOwnership'",
   );
+  expect(WINDOWS_PRIVATE_SCRIPT).toContain("if ($request.kind -eq 'location')");
+  expect(WINDOWS_PRIVATE_WORKER_SCRIPT).toContain(
+    "if ($request.kind -eq 'location')",
+  );
+  expect(WINDOWS_PRIVATE_SCRIPT).toContain("if ($request.kind -ne 'location')");
+});
+
+it("pre-checks a candidate Windows install location without repairing it", async () => {
+  const ok = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "" });
+  await windowsPrivateLocation("D:\\Linger", ok);
+  expect(JSON.parse(ok.mock.calls[0]![2].input)).toEqual({
+    path: path.resolve("D:\\Linger"),
+    kind: "location",
+    repair: false,
+  });
+
+  const refused = vi.fn().mockResolvedValue({
+    code: 1,
+    stdout: "UNSAFE_PARENT_ACCESS",
+    stderr: "",
+  });
+  await expect(
+    windowsPrivateLocation("F:\\Linger", refused),
+  ).rejects.toMatchObject({
+    code: WINDOWS_PRIVATE_PATH_UNSAFE,
+    reason: "UNSAFE_PARENT_ACCESS",
+    path: path.resolve("F:\\Linger"),
+  });
 });
 it("hands on the code and reason of a refusal, and nothing else", async () => {
   const run = vi.fn().mockResolvedValue({

@@ -7,6 +7,7 @@ import {
   WINDOWS_PRIVATE_PREAMBLE,
   WINDOWS_PRIVATE_SCRIPT,
   windowsPowerShellArguments,
+  windowsPrivateLocation,
   windowsPrivatePath,
 } from "./windows-private.js";
 import { runProcess } from "./process.js";
@@ -327,6 +328,33 @@ it.skipIf(process.platform !== "win32")(
     await mutate("None");
     await expect(windowsPrivatePath(child, "directory")).rejects.toMatchObject({
       reason: "UNSAFE_PARENT_ACCESS",
+    });
+    await expect(windowsPrivateLocation(child)).rejects.toMatchObject({
+      reason: "UNSAFE_PARENT_ACCESS",
+    });
+    await expect(
+      windowsPrivateLocation(path.join(root, "not-yet-created")),
+    ).rejects.toMatchObject({
+      reason: "UNSAFE_PARENT_ACCESS",
+    });
+  },
+);
+
+it.skipIf(process.platform !== "win32")(
+  "pre-checks existing and missing candidate locations without mutating them",
+  async () => {
+    const root = await fixture();
+    const { existsSync } = await import("node:fs");
+    const missing = path.join(root, "Linger");
+    await expect(windowsPrivateLocation(missing)).resolves.toBeUndefined();
+    expect(existsSync(missing)).toBe(false);
+    await mkdir(missing);
+    await expect(windowsPrivateLocation(missing)).resolves.toBeUndefined();
+    // Pre-checking leaves the existing folder's inherited DACL untouched.
+    await expect(
+      windowsPrivatePath(missing, "directory"),
+    ).rejects.toMatchObject({
+      reason: "INHERITED_ACCESS",
     });
   },
 );

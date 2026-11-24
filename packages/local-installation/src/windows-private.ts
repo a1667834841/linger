@@ -53,18 +53,39 @@ public static class LingerLinkedToken {
   return [LingerLinkedToken]::IsAdministrator($binary)
 }`;
 
-const WINDOWS_PRIVATE_CHECK_BODY = String.raw`  $item = Get-Item -LiteralPath $request.path -Force
-  if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or ($item.PSIsContainer -ne ($request.kind -eq 'directory'))) { throw 'UNSAFE_TYPE' }
-  $acl = Get-Acl -LiteralPath $item.FullName
-  # What an elevated process (Run as administrator, the built-in
-  # Administrator) creates is owned by Administrators. For an administrator
-  # that owner counts as the user, as in Git for Windows: the ancestor check
-  # below already lets the group own and replace every parent folder, and an
-  # administrator can take ownership of any file, so it trusts no one new.
-  $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
-  if ($owner -ne $sid.Value -and !($owner -eq $admins -and (Test-Administrator))) { throw 'UNSAFE_OWNER' }
-  $parent = $item.Directory
-  if ($item.PSIsContainer) { $parent = $item.Parent }
+const WINDOWS_PRIVATE_CHECK_BODY = String.raw`  if ($request.kind -eq 'location') {
+    if (Test-Path -LiteralPath $request.path) {
+      $item = Get-Item -LiteralPath $request.path -Force
+      if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or !$item.PSIsContainer -or !$item.Parent) { throw 'UNSAFE_TYPE' }
+      $acl = Get-Acl -LiteralPath $item.FullName
+      $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+      if ($owner -ne $sid.Value -and !($owner -eq $admins -and (Test-Administrator))) { throw 'UNSAFE_OWNER' }
+      $parent = $item.Parent
+    } else {
+      $probe = [IO.Path]::GetDirectoryName($request.path)
+      while ($probe -and !(Test-Path -LiteralPath $probe)) {
+        $next = [IO.Path]::GetDirectoryName($probe)
+        if ($next -eq $probe) { $probe = $null; break }
+        $probe = $next
+      }
+      if (!$probe) { throw 'UNSAFE_TYPE' }
+      $parent = Get-Item -LiteralPath $probe -Force
+      if (!$parent.PSIsContainer) { throw 'UNSAFE_TYPE' }
+    }
+  } else {
+    $item = Get-Item -LiteralPath $request.path -Force
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or ($item.PSIsContainer -ne ($request.kind -eq 'directory'))) { throw 'UNSAFE_TYPE' }
+    $acl = Get-Acl -LiteralPath $item.FullName
+    # What an elevated process (Run as administrator, the built-in
+    # Administrator) creates is owned by Administrators. For an administrator
+    # that owner counts as the user, as in Git for Windows: the ancestor check
+    # below already lets the group own and replace every parent folder, and an
+    # administrator can take ownership of any file, so it trusts no one new.
+    $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    if ($owner -ne $sid.Value -and !($owner -eq $admins -and (Test-Administrator))) { throw 'UNSAFE_OWNER' }
+    $parent = $item.Directory
+    if ($item.PSIsContainer) { $parent = $item.Parent }
+  }
   while ($parent) {
     if ($parent.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'UNSAFE_PARENT_LINK' }
     $parentAcl = Get-Acl -LiteralPath $parent.FullName
@@ -86,6 +107,7 @@ const WINDOWS_PRIVATE_CHECK_BODY = String.raw`  $item = Get-Item -LiteralPath $r
     }
     $parent = $parent.Parent
   }
+  if ($request.kind -ne 'location') {
   if ($request.repair) {
     # Only the DACL that repair would install can skip propagation. Compare
     # the rules because Windows may add flags to the persisted descriptor.
@@ -120,7 +142,8 @@ const WINDOWS_PRIVATE_CHECK_BODY = String.raw`  $item = Get-Item -LiteralPath $r
       if ($rule.IdentityReference.Value -eq $sid.Value) { $currentAllowed = $true }
     }
   }
-  if (!$currentAllowed) { throw 'MISSING_OWNER_ACCESS' }`;
+  if (!$currentAllowed) { throw 'MISSING_OWNER_ACCESS' }
+  }`;
 
 // The program is fixed. Only a path and operation travel over stdin; no file
 // contents, user-controlled PowerShell, or credentials appear in argv/output.
@@ -412,6 +435,34 @@ export async function windowsPrivatePath(
       )
     : await defaultWorker.execute(payload);
   if (result.code !== 0) throw privatePathError(file, result.stdout);
+}
+
+/**
+ * Checks whether a candidate Windows install directory can host private state
+ * without creating it or changing any ACLs. When the directory already exists,
+ * verifies its type, owner, and ancestors; otherwise verifies the nearest
+ * existing ancestor and every directory above it.
+ */
+export async function windowsPrivateLocation(
+  directory: string,
+  run?: typeof runProcess,
+): Promise<void> {
+  const payload = JSON.stringify({
+    path: path.resolve(directory),
+    kind: "location",
+    repair: false,
+  });
+  const result = run
+    ? await run(
+        powershellPath(),
+        windowsPowerShellArguments(WINDOWS_PRIVATE_SCRIPT),
+        {
+          input: payload,
+          timeoutMs: REQUEST_TIMEOUT_MS,
+        },
+      )
+    : await defaultWorker.execute(payload);
+  if (result.code !== 0) throw privatePathError(directory, result.stdout);
 }
 /** The code of an error from windowsPrivatePath; its reason says why. */
 export const WINDOWS_PRIVATE_PATH_UNSAFE = "WINDOWS_PRIVATE_PATH_UNSAFE";

@@ -31,9 +31,12 @@ const mask = (rights: string[]) =>
     if (value === undefined) throw new Error(`Unknown right ${right}`);
     return bits | value;
   }, 0);
-// Modify, the right Windows gives Authenticated Users on every data drive it
+// Modify, the right Windows gives Authenticated Users on some data drives it
 // formats, and which folders made on that drive inherit.
 const MODIFY = 0x1301bf;
+// FullControl, the right Windows gives Everyone on stock secondary NTFS data
+// drives (Everyone:(OI)(CI)(F)), which includes child deletion and ACL edits.
+const FULL_CONTROL = 0x1f01ff;
 
 describe("the ancestor rule in the fixed ACL program", () => {
   it("counts Delete only on a folder that has a parent", () => {
@@ -54,5 +57,15 @@ describe("the ancestor rule in the fixed ACL program", () => {
   it("lets others hold Modify on a data drive's root but not on a folder in it", () => {
     expect(MODIFY & mask(EVERYWHERE)).toBe(0);
     expect(MODIFY & mask([...BELOW_ROOT, ...EVERYWHERE])).toBe(RIGHTS.Delete);
+  });
+
+  it("keeps refusing FullControl (Everyone:(F)) even on a volume root", () => {
+    expect(FULL_CONTROL & mask(EVERYWHERE)).toBe(
+      mask([
+        "DeleteSubdirectoriesAndFiles",
+        "ChangePermissions",
+        "TakeOwnership",
+      ]),
+    );
   });
 });
