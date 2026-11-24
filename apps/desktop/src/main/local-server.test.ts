@@ -2651,6 +2651,68 @@ describe("LocalServerModule", () => {
     await f.host.stop("quit");
   });
 
+  // The installer outlives the app: a local model download from before a
+  // quit is still running when the person picks a subscription instead.
+  it("stops a local model installation still running for another choice", async () => {
+    const localJob = {
+      id: "job",
+      instance: LOCAL_INSTANCE,
+      setupChoice: "local-models",
+      state: "running",
+      stage: "runtime",
+      createdAt: "2026-11-03T00:00:00Z",
+      stages: [],
+    };
+    for (const runtime of ["codex", "recommended"] as const) {
+      const f = fixture(
+        withCheckout,
+        {},
+        checkout,
+        installerApi(
+          [localJob],
+          DONE,
+          Response.json({ recommendation: "claude" }),
+        ),
+      );
+      await f.host.start();
+      await f.module.begin({ runtime });
+      expect(f.api.canceled).toEqual(["job"]);
+      expect(f.api.created).toEqual([
+        {
+          instance: LOCAL_INSTANCE,
+          setupChoice: runtime === "codex" ? "codex" : "claude",
+        },
+      ]);
+      expect(f.module.status().phase).toBe("ready");
+      await f.host.stop("quit");
+    }
+  });
+
+  it("follows a local model installation still running for the same choice", async () => {
+    const f = fixture(
+      withCheckout,
+      {},
+      checkout,
+      installerApi([
+        {
+          id: "job",
+          instance: LOCAL_INSTANCE,
+          setupChoice: "local-models",
+          state: "running",
+          stage: "runtime",
+          createdAt: "2026-11-03T00:00:00Z",
+          stages: [],
+        },
+      ]),
+    );
+    await f.host.start();
+    await f.module.begin({ runtime: "local" });
+    expect(f.api.canceled).toEqual([]);
+    expect(f.api.created).toEqual([]);
+    expect(f.module.status().phase).toBe("ready");
+    await f.host.stop("quit");
+  });
+
   it("installs again when a finished installation's data is gone", async () => {
     const f = fixture(
       withCheckout,
@@ -5328,6 +5390,59 @@ describe("InstallerApi polling", () => {
         () => {},
       ),
     ).rejects.toThrow("Images broke");
+  });
+
+  it("waits for a cancelled job for another runtime to stop before starting", async () => {
+    // The installer hands its active job back to a new request, so the new
+    // one is asked for only once the old one has stopped.
+    const calls: string[] = [];
+    let reads = 0;
+    const fetcher = (async (input: URL, init: RequestInit = {}) => {
+      calls.push(`${init.method ?? "GET"} ${input.pathname}`);
+      if (input.pathname === "/api/session")
+        return new Response("{}", {
+          headers: { "set-cookie": "linger_installer_session=s1; Path=/api" },
+        });
+      if (input.pathname === "/api/jobs" && init.method === "POST")
+        return job({ id: "new", setupChoice: "codex", state: "queued" });
+      if (input.pathname === "/api/jobs")
+        return Response.json({
+          items: [
+            {
+              id: "old",
+              instance: LOCAL_INSTANCE,
+              setupChoice: "local-models",
+              state: "running",
+              createdAt: "2026-11-03T00:00:00Z",
+              stages: [],
+            },
+          ],
+        });
+      if (input.pathname === "/api/jobs/old/cancel")
+        return job({ id: "old", state: "running", cancelRequested: true });
+      if (input.pathname === "/api/jobs/old")
+        return job({ id: "old", state: ++reads < 2 ? "running" : "canceled" });
+      if (input.pathname === "/api/jobs/new")
+        return job({
+          id: "new",
+          state: "succeeded",
+          origin: "http://localhost:3000",
+        });
+      return Response.json({}, { status: 404 });
+    }) as unknown as typeof fetch;
+    const result = await (
+      await open(fetcher)
+    ).run(plan, new AbortController().signal, () => {});
+    expect(result.origin).toBe("http://localhost:3000");
+    expect(calls).toEqual([
+      "POST /api/session",
+      "GET /api/jobs",
+      "POST /api/jobs/old/cancel",
+      "GET /api/jobs/old",
+      "GET /api/jobs/old",
+      "POST /api/jobs",
+      "GET /api/jobs/new",
+    ]);
   });
 
   it("stops reconnecting when the caller aborts", async () => {

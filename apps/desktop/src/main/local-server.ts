@@ -3633,10 +3633,27 @@ export class InstallerApi {
     const latest = items
       .filter((item) => item.instance === LOCAL_INSTANCE && !item.preparation)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    // The installer outlives the app, so a job from an earlier attempt may
+    // still run for a runtime the person no longer chose; a job naming
+    // another runtime than this plan's is not followed. A recommended runtime
+    // is never the local model (`recommended` maps that pick to Pi).
+    const wanted = plan.byok
+      ? plan.byok.runtime
+      : plan.runtime === "local"
+        ? "local-models"
+        : plan.runtime === "recommended"
+          ? undefined
+          : plan.runtime;
+    const forPlan = (item: Job) =>
+      !item.setupChoice ||
+      (wanted
+        ? item.setupChoice === wanted
+        : item.setupChoice !== "local-models");
     let job: Job;
     if (
       !fresh &&
       latest &&
+      forPlan(latest) &&
       (["queued", "running"].includes(latest.state) ||
         // A finished one only while its instance is still there; its data
         // may have been removed since. Its services must still run too: after
@@ -3648,26 +3665,31 @@ export class InstallerApi {
     )
       job = latest;
     else {
-      // The installer answers a new request with a job still waiting for
-      // the person, so an attempt that stopped there would be handed back,
-      // failed as it ended, on every later attempt.
-      if (latest?.state === "waiting_user")
-        await this.#json(
+      // The installer answers a new request with its active job (running,
+      // or still waiting for the person), so an attempt that stopped there
+      // would be handed back, failed as it ended, on every later attempt, and
+      // one for another runtime would keep running. A running job stops at
+      // its next step, so wait until it has.
+      const active = (item: Job) =>
+        ["queued", "running", "waiting_user"].includes(item.state);
+      if (latest && active(latest)) {
+        let stopping = await this.#json<Job>(
           `/api/jobs/${encodeURIComponent(latest.id)}/cancel`,
           {},
         );
-      const setupChoice = plan.byok
-        ? plan.byok.runtime
-        : plan.runtime === "local"
-          ? "local-models"
-          : plan.runtime === "recommended"
-            ? await this.#json<{ recommendation?: string }>("/api/setup").then(
-                recommended,
-                // Inspection probes GPUs and model tools; when it cannot run,
-                // Codex is the runtime that needs nothing on this computer.
-                () => "codex",
-              )
-            : plan.runtime;
+        while (active(stopping)) {
+          await delay(this.#pollMs, undefined, { signal });
+          stopping = await this.#poll(latest.id, signal, () => {});
+        }
+      }
+      const setupChoice =
+        wanted ??
+        (await this.#json<{ recommendation?: string }>("/api/setup").then(
+          recommended,
+          // Inspection probes GPUs and model tools; when it cannot run,
+          // Codex is the runtime that needs nothing on this computer.
+          () => "codex",
+        ));
       job = await this.#json<Job>("/api/jobs", {
         instance: LOCAL_INSTANCE,
         ...(setupChoice ? { setupChoice } : {}),
