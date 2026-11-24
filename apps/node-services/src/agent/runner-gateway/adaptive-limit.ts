@@ -89,11 +89,12 @@ interface Latencies {
 /**
  * An endpoint's confirmed concurrency, grown only by silent background probes
  * and backed off fast. While idle of foreground work, the queue may probe
- * one unit above the confirmed limit using yieldable background calls: the
- * limit promotes only when probe samples stay within RAISE_AT_MOST of the
- * lone-unit baseline, and fails fast when a sample exceeds LOWER_ABOVE or the
- * endpoint refuses work. Steady-state work shrinks by one when clearly slower
- * and halves on overload. Running units are never interrupted by a limit drop.
+ * one unit above the confirmed limit using a fixed wave of yieldable
+ * background calls: the limit promotes only when every call in the probe wave
+ * stays within RAISE_AT_MOST of the lone-unit baseline, and fails fast when
+ * any colliding sample exceeds RAISE_AT_MOST or the endpoint refuses work.
+ * Steady-state work shrinks by one when clearly slower and halves on overload.
+ * Running units are never interrupted by a limit drop.
  *
  * A limit it had to come down from or failed to probe is the ceiling: it is
  * not tried again until the retry time. A retry that promotes clears the
@@ -197,7 +198,10 @@ export class AdaptiveLimit {
         : undefined;
 
     // A background probe evaluates samples that collided at the probed
-    // concurrency against the lone-unit baseline.
+    // concurrency against the lone-unit baseline. On a K-slot server probing
+    // K + 1, K calls finish fast while only the queued tail call slows down,
+    // so any colliding sample past RAISE_AT_MOST fails the probe at once and
+    // promotion requires all probing calls to stay within RAISE_AT_MOST.
     if (
       this.#probing !== undefined &&
       signal.source === "call" &&
@@ -205,7 +209,7 @@ export class AdaptiveLimit {
       peak >= this.#probing
     ) {
       const sampleRatio = perThousand / baseline;
-      if (sampleRatio > LOWER_ABOVE) {
+      if (sampleRatio > RAISE_AT_MOST) {
         const latency: LatencySample = {
           source: signal.source,
           perThousand,
@@ -220,11 +224,11 @@ export class AdaptiveLimit {
         mean >= this.#probing - PROBE_CONCURRENCY_TOLERANCE &&
         mean <= this.#probing + 0.5
       ) {
-        const needed = Math.min(WINDOW, this.#probing);
+        const needed = this.#probing;
         keepLast(latencies.probeWindow, perThousand, needed);
         const probeWindow =
           latencies.probeWindow.length >= needed
-            ? median(latencies.probeWindow)
+            ? Math.max(...latencies.probeWindow)
             : undefined;
         const latency: LatencySample = {
           source: signal.source,

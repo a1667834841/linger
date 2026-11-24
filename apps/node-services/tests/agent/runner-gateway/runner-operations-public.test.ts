@@ -1587,6 +1587,9 @@ describe("RunnerGateway", () => {
           ),
         ).toHaveLength(5),
       );
+      // Hold concurrency 2 briefly so both probe samples stay above mean 1.5
+      // under event-loop jitter.
+      await new Promise((resolve) => setTimeout(resolve, 15));
       await answer(3);
       await answer(4);
       await Promise.all([p1, p2]);
