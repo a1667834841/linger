@@ -1,0 +1,293 @@
+import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
+
+import { packDeterministicTarZst } from "../../scripts/build-app-bundles.mjs";
+import { BundleStoreModule } from "./bundle-store.js";
+import { BundleUpdaterModule } from "./bundle-updater.js";
+import { ConfigStore } from "./config.js";
+import { EventBus, ModuleHost } from "./modules.js";
+import type { AppManifestV3 } from "./update-manifest.js";
+
+const tempDirs: string[] = [];
+
+async function makeTempDir(prefix: string): Promise<string> {
+  const dir = await mkdtemp(path.join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+
+afterEach(async () => {
+  while (tempDirs.length > 0) {
+    await rm(tempDirs.pop()!, { recursive: true, force: true });
+  }
+});
+
+const noopLog = { info: () => {}, warn: () => {}, error: () => {} };
+
+function makeSignedPayload(manifest: AppManifestV3, privateKey: KeyObject) {
+  const bytes = Buffer.from(JSON.stringify(manifest));
+  const sig = sign(null, bytes, privateKey).toString("base64");
+  return { bytes, sig };
+}
+
+describe("BundleUpdaterModule", () => {
+  it("downloads only changed modules, falls back to mirror on primary failure, and skips cached modules", async () => {
+    const home = await makeTempDir("linger-updater-home-");
+    const payloadV1 = await makeTempDir("linger-updater-p1-");
+    const payloadV2 = await makeTempDir("linger-updater-p2-");
+    const out = await makeTempDir("linger-updater-out-");
+
+    await writeFile(path.join(payloadV1, "index.html"), "v1", "utf8");
+    await writeFile(path.join(payloadV2, "index.html"), "v2", "utf8");
+
+    const basePack = await packDeterministicTarZst(payloadV1, out, "shared");
+    const webV2Pack = await packDeterministicTarZst(payloadV2, out, "web");
+    const baseBytes = await readFile(basePack.filePath);
+    const webV2Bytes = await readFile(webV2Pack.filePath);
+
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const publicPem = publicKey.export({ type: "spki", format: "pem" }).toString();
+
+    const store = new BundleStoreModule({ home, target: "darwin-arm64" });
+    const config = new ConfigStore(path.join(home, "config.json"), {
+      updateFeedUrl: "https://cdn.example.com/linger",
+      updateChannel: "stable",
+      installId: "stable-test-install",
+    });
+    const bus = new EventBus();
+    const stagedEvents: Array<{ version: string; changed: readonly string[] }> = [];
+    bus.on("bundle.staged", (v, changed) => stagedEvents.push({ version: v, changed }));
+
+    const fetchedUrls: string[] = [];
+    const nodeDepsHash = `sha256:${"a".repeat(64)}`;
+    const nodeDepsShortId = `nd-${"a".repeat(16)}`;
+
+    const mkRef = (id: string, pack: typeof basePack, primaryBroken = false) => ({
+      artifactId: `${id}-${pack.sha256.slice(0, 12)}`,
+      format: "tar.zst" as const,
+      url: primaryBroken
+        ? `https://broken.example.com/${id}.tar.zst`
+        : `https://cdn.example.com/linger/bundles/${id}/${id}.tar.zst`,
+      ...(primaryBroken
+        ? { mirrors: [`https://mirror.example.com/linger/bundles/${id}/${id}.tar.zst`] }
+        : {}),
+      sha256: pack.sha256,
+      size: pack.size,
+    });
+
+    const manifestV2: AppManifestV3 = {
+      schema: 3,
+      channel: "stable",
+      releaseId: "r-0.2.15",
+      appVersion: "0.2.15",
+      publishedAt: "2026-11-24T12:00:00Z",
+      rollout: { percent: 100 },
+      compat: {
+        minShellVersion: "0.2.0",
+        minNativeDepsHash: nodeDepsHash,
+        runnerGatewayProtocol: 1,
+        dbSchemaEpoch: 892,
+        rollbackSafe: true,
+      },
+      bundles: {
+        web: {
+          arch: "noarch",
+          originAppVersion: "0.2.15",
+          inputHash: "1".repeat(64),
+          artifact: mkRef("web", webV2Pack, true), // primary fails -> mirror succeeds!
+        },
+        "node-services": {
+          arch: "noarch",
+          originAppVersion: "0.2.14",
+          inputHash: "2".repeat(64),
+          nativeDepsHash: nodeDepsHash,
+          artifact: mkRef("node-services", basePack),
+        },
+        "node-native-deps": {
+          arch: "per-target",
+          originAppVersion: "0.2.0",
+          inputHash: "3".repeat(64),
+          targets: { "darwin-arm64": mkRef("node-native-deps", basePack) },
+        },
+        teamhub: {
+          arch: "per-target",
+          originAppVersion: "0.2.14",
+          inputHash: "4".repeat(64),
+          targets: { "darwin-arm64": mkRef("teamhub", basePack) },
+        },
+        "computer-daemon": {
+          arch: "per-target",
+          originAppVersion: "0.2.14",
+          inputHash: "5".repeat(64),
+          targets: { "darwin-arm64": mkRef("computer-daemon", basePack) },
+        },
+        installer: {
+          arch: "noarch",
+          originAppVersion: "0.2.14",
+          inputHash: "6".repeat(64),
+          artifact: mkRef("installer", basePack),
+        },
+        "skills-prompts": {
+          arch: "noarch",
+          originAppVersion: "0.2.14",
+          inputHash: "7".repeat(64),
+          artifact: mkRef("skills-prompts", basePack),
+        },
+      },
+    };
+    const signed = makeSignedPayload(manifestV2, privateKey);
+
+    const mockFetch: typeof fetch = async (input) => {
+      const url = input.toString();
+      fetchedUrls.push(url);
+      if (url.endsWith("/app-manifest.json")) {
+        return new Response(new Uint8Array(signed.bytes), { status: 200 });
+      }
+      if (url.endsWith("/app-manifest.json.sig")) {
+        return new Response(signed.sig, { status: 200 });
+      }
+      if (url.startsWith("https://broken.example.com/")) {
+        return new Response("down", { status: 503 });
+      }
+      if (url.includes("/web/")) {
+        return new Response(new Uint8Array(webV2Bytes), { status: 200 });
+      }
+      return new Response(new Uint8Array(baseBytes), { status: 200 });
+    };
+
+    const updater = new BundleUpdaterModule({
+      shellVersion: "0.2.0",
+      target: "darwin-arm64",
+      enabled: true,
+      checkDelayMs: 60 * 60_000,
+      fetch: mockFetch,
+      publicKey: publicPem,
+    });
+
+    const host = new ModuleHost(
+      [
+        { name: "Config", dependsOn: [], start: async () => {}, stop: async () => {} },
+        store,
+        updater,
+      ],
+      { config, log: noopLog, bus },
+    );
+    await host.start();
+
+    // Pre-populate all non-web modules + node-native-deps in BundleStore!
+    await store.stageNodeDepsArchive(nodeDepsShortId, basePack.filePath, basePack.sha256);
+    for (const mod of [
+      "node-services",
+      "teamhub",
+      "computer-daemon",
+      "installer",
+      "skills-prompts",
+    ] as const) {
+      await store.stageModuleArchive(
+        mod,
+        `${mod}-${basePack.sha256.slice(0, 12)}`,
+        basePack.filePath,
+        basePack.sha256,
+      );
+    }
+
+    await updater.check();
+
+    expect(updater.state()).toEqual({
+      kind: "staged",
+      version: "0.2.15",
+      changedModules: ["web"],
+    });
+    expect(stagedEvents).toEqual([{ version: "0.2.15", changed: ["web"] }]);
+    // Mirror was used for web, and ZERO other bundles were downloaded!
+    expect(fetchedUrls).toContain("https://broken.example.com/web.tar.zst");
+    expect(fetchedUrls).toContain("https://mirror.example.com/linger/bundles/web/web.tar.zst");
+    expect(fetchedUrls.some((u) => u.includes("/teamhub/"))).toBe(false);
+    expect(fetchedUrls.some((u) => u.includes("/node-native-deps/"))).toBe(false);
+
+    await host.stop("quit");
+  });
+
+  it("skips denylisted versions and defers when rollout percent is 0", async () => {
+    const home = await makeTempDir("linger-updater-gate-");
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const publicPem = publicKey.export({ type: "spki", format: "pem" }).toString();
+
+    const store = new BundleStoreModule({ home, target: "darwin-arm64" });
+    const config = new ConfigStore(path.join(home, "config.json"), {
+      updateFeedUrl: "https://cdn.example.com/linger",
+      installId: "install-abc",
+    });
+
+    const dummyRef = {
+      artifactId: "x-111111111111",
+      format: "tar.zst" as const,
+      url: "https://cdn.example.com/x.tar.zst",
+      sha256: "a".repeat(64),
+      size: 10,
+    };
+    const manifest: AppManifestV3 = {
+      schema: 3,
+      channel: "stable",
+      releaseId: "r-0.2.20",
+      appVersion: "0.2.20",
+      publishedAt: "2026-11-24T12:00:00Z",
+      rollout: { percent: 0 },
+      compat: {
+        minShellVersion: "0.2.0",
+        minNativeDepsHash: `sha256:${"a".repeat(64)}`,
+        runnerGatewayProtocol: 1,
+        dbSchemaEpoch: 892,
+        rollbackSafe: true,
+      },
+      bundles: {
+        web: { arch: "noarch", originAppVersion: "0.2.20", inputHash: "1".repeat(64), artifact: dummyRef },
+        "node-services": { arch: "noarch", originAppVersion: "0.2.20", inputHash: "2".repeat(64), artifact: dummyRef },
+        "node-native-deps": { arch: "per-target", originAppVersion: "0.2.0", inputHash: "3".repeat(64), targets: { "darwin-arm64": dummyRef } },
+        teamhub: { arch: "per-target", originAppVersion: "0.2.20", inputHash: "4".repeat(64), targets: { "darwin-arm64": dummyRef } },
+        "computer-daemon": { arch: "per-target", originAppVersion: "0.2.20", inputHash: "5".repeat(64), targets: { "darwin-arm64": dummyRef } },
+        installer: { arch: "noarch", originAppVersion: "0.2.20", inputHash: "6".repeat(64), artifact: dummyRef },
+        "skills-prompts": { arch: "noarch", originAppVersion: "0.2.20", inputHash: "7".repeat(64), artifact: dummyRef },
+      },
+    };
+    const signed = makeSignedPayload(manifest, privateKey);
+
+    const updater = new BundleUpdaterModule({
+      shellVersion: "0.2.0",
+      target: "darwin-arm64",
+      checkDelayMs: 60 * 60_000,
+      publicKey: publicPem,
+      fetch: async (url) =>
+        url.toString().endsWith(".sig")
+          ? new Response(signed.sig, { status: 200 })
+          : new Response(new Uint8Array(signed.bytes), { status: 200 }),
+    });
+    const host = new ModuleHost(
+      [
+        { name: "Config", dependsOn: [], start: async () => {}, stop: async () => {} },
+        store,
+        updater,
+      ],
+      { config, log: noopLog, bus: new EventBus() },
+    );
+    await host.start();
+
+    // Deferred due to rollout.percent = 0
+    await updater.check();
+    expect(updater.state()).toEqual({ kind: "idle" });
+
+    // Denylisted version is also skipped even when urgent
+    await store.addDenylist({
+      appVersion: "0.2.20",
+      failedAt: new Date().toISOString(),
+      stage: "crash-watchdog",
+      reason: "bad build",
+    });
+    expect(await store.isDenylisted("0.2.20")).toBe(true);
+    await host.stop("quit");
+  });
+});

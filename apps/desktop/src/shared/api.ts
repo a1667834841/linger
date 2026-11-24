@@ -53,6 +53,25 @@ export type DesktopPermissionStep =
     }
   | { readonly action: "relaunch"; readonly subject: "linger" };
 
+export type UpdateChannel = "stable" | "beta" | "canary";
+export type UpdateScope = "shell" | "app" | "web" | "skills";
+export type UpdateActionKind =
+  | "reload-page"
+  | "restart-services"
+  | "restart-app"
+  | "download-shell";
+
+export interface DesktopVersionInfo {
+  readonly shellVersion: string;
+  readonly appVersion: string;
+  readonly channel: UpdateChannel;
+  readonly rollbackNotice?: {
+    readonly fromVersion: string;
+    readonly toVersion: string;
+    readonly reason: string;
+  };
+}
+
 // The updater's progress as the page sees it; the same states the tray shows.
 export type DesktopUpdateState =
   | { readonly kind: "idle" }
@@ -65,6 +84,13 @@ export type DesktopUpdateState =
         | "installing"
         | "available";
       readonly version: string;
+      readonly scope?: UpdateScope;
+      readonly action?: UpdateActionKind;
+      readonly progress?: {
+        readonly bytesDownloaded: number;
+        readonly bytesTotal: number;
+        readonly changedModules: readonly string[];
+      };
     }
   | { readonly kind: "failed"; readonly error: string };
 
@@ -131,6 +157,11 @@ export interface LingerDesktopApi {
     install(): Promise<void>;
     // Try Again after a failure.
     check(): Promise<void>;
+    // V2 modular incremental update controls.
+    getInfo?(): Promise<DesktopVersionInfo>;
+    setChannel?(channel: UpdateChannel): Promise<DesktopVersionInfo>;
+    reloadPage?(): Promise<void>;
+    dismissRollbackNotice?(): Promise<void>;
   };
   readonly connectorOAuth: {
     prepare(): Promise<string>;
@@ -190,6 +221,10 @@ export const IPC = {
   updateStateEvent: "update.state.event",
   updateInstall: "update.install",
   updateCheck: "update.check",
+  updateInfo: "update.info",
+  updateSetChannel: "update.set-channel",
+  updateReloadPage: "update.reload-page",
+  updateDismissRollback: "update.dismiss-rollback",
   connectorOAuthPrepare: "connector-oauth.prepare",
   connectorOAuthReturn: "connector-oauth.return",
   previewFrameRefused: "preview.frame-refused",

@@ -198,6 +198,9 @@ export class ComputerDaemonModule implements Module {
   readonly name = "ComputerDaemon";
   readonly dependsOn = ["Config", "WorkspaceGrants"];
   readonly #options: ComputerDaemonOptions;
+  #spawnOverride: SpawnDaemon | undefined;
+  #teamhubCliOverride: string | undefined;
+  #extraEnv: Readonly<Record<string, string>> | undefined;
   #ctx: ModuleContext | undefined;
   #child: DaemonChild | undefined;
   #state: RuntimeState = "stopped";
@@ -238,6 +241,26 @@ export class ComputerDaemonModule implements Module {
   // FAILED_AFTER_EXITS times in a row.
   failure(): string | undefined {
     return this.#failure;
+  }
+
+  /**
+   * V2 incremental update hook: swaps the daemon executable, teamhub-cli path,
+   * and shared Node/tools env overrides, then gracefully restarts when idle.
+   */
+  reloadBinary(options: {
+    readonly spawn: SpawnDaemon;
+    readonly teamhubCliDirectory?: string;
+    readonly extraEnv?: Readonly<Record<string, string>>;
+    readonly whenIdle?: boolean;
+  }): void {
+    this.#spawnOverride = options.spawn;
+    if (options.teamhubCliDirectory !== undefined) {
+      this.#teamhubCliOverride = options.teamhubCliDirectory;
+    }
+    if (options.extraEnv !== undefined) {
+      this.#extraEnv = options.extraEnv;
+    }
+    this.#requestRestart(options.whenIdle ?? true);
   }
 
   async start(ctx: ModuleContext): Promise<void> {
@@ -363,7 +386,10 @@ export class ComputerDaemonModule implements Module {
         this.#setState("stopped");
         return;
       }
-      const env = daemonEnvironment(this.#env, config.runtimeEnvironment);
+      const env = {
+        ...daemonEnvironment(this.#env, config.runtimeEnvironment),
+        ...(this.#extraEnv ?? {}),
+      };
       const credential = this.#options.credentials.read();
       if (credential?.computerId !== config.computerId) {
         // Reconnecting this computer stores a new credential.
@@ -376,7 +402,7 @@ export class ComputerDaemonModule implements Module {
       this.#setState("starting");
       this.#setConnection("connecting");
       this.#startedAt = Date.now();
-      child = this.#options.spawn(configFile, {
+      child = (this.#spawnOverride ?? this.#options.spawn)(configFile, {
         ...env,
         [TOKEN_ENV]: credential.token,
       });
@@ -544,8 +570,11 @@ export class ComputerDaemonModule implements Module {
       JSON.stringify(
         daemonConfig(config, credential, {
           directory,
-          ...(this.#options.teamhubCliDirectory
-            ? { teamhubCliDirectory: this.#options.teamhubCliDirectory }
+          ...((this.#teamhubCliOverride ?? this.#options.teamhubCliDirectory)
+            ? {
+                teamhubCliDirectory:
+                  this.#teamhubCliOverride ?? this.#options.teamhubCliDirectory,
+              }
             : {}),
           ...(this.#options.defaultDisplayName
             ? { defaultDisplayName: this.#options.defaultDisplayName }

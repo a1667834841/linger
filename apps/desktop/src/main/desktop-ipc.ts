@@ -6,10 +6,13 @@ import {
   type ComputerStatus,
   type DesktopSettings,
   type DesktopUpdateState,
+  type DesktopVersionInfo,
   type LocalAccountSignIn,
   type WorkspaceGrantView,
 } from "../shared/api.js";
 import { LANGUAGES } from "../i18n/language.js";
+import type { BundleStoreModule } from "./bundle-store.js";
+import type { BundleUpdaterModule } from "./bundle-updater.js";
 import type { ComputerDaemonModule } from "./computer-daemon.js";
 import type { WorkspaceGrant } from "./config.js";
 import { ConnectorOAuth } from "./connector-oauth.js";
@@ -20,6 +23,7 @@ import type { LocalServerModule } from "./local-server.js";
 import type { Module, ModuleContext } from "./modules.js";
 import { sameOrigin } from "./navigation.js";
 import type { PowerGuardModule } from "./power-guard.js";
+import type { ReleaseOrchestratorModule } from "./release-orchestrator.js";
 import {
   runDesktopPermissionStep,
   type DesktopPermissionHost,
@@ -30,6 +34,7 @@ import type { WorkspaceGrantsModule } from "./workspace-grants.js";
 
 const grantIdInput = z.string().min(1).max(128);
 const languageInput = z.enum(LANGUAGES);
+const channelInput = z.enum(["stable", "beta", "canary"]);
 // The server address is not settable from the SPA: a page served by one
 // server must not be able to repoint the app. It changes on app://offline.
 const settingsPatchInput = z
@@ -224,9 +229,107 @@ export class DesktopIpcModule implements Module {
         throw error;
       }
     });
-    handle(IPC.updateState, () => updateView(updater.state()));
-    handle(IPC.updateInstall, () => updater.install());
-    handle(IPC.updateCheck, () => updater.check());
+    const optionalModule = <T extends Module>(name: string): T | undefined => {
+      try {
+        return ctx.get<T>(name);
+      } catch {
+        return undefined;
+      }
+    };
+    const bundleStore = optionalModule<BundleStoreModule>("BundleStore");
+    const bundleUpdater = optionalModule<BundleUpdaterModule>("BundleUpdater");
+    const orchestrator = optionalModule<ReleaseOrchestratorModule>(
+      "ReleaseOrchestrator",
+    );
+
+    const mergedUpdateState = (): DesktopUpdateState => {
+      const shellState = updateView(updater.state());
+      if (shellState.kind !== "idle") return shellState;
+      const orchState = orchestrator?.state();
+      if (orchState?.kind === "ready") {
+        return {
+          kind: "ready",
+          version: orchState.version,
+          scope: orchState.diff.scope,
+          action: orchState.diff.action,
+        };
+      }
+      if (orchState?.kind === "waiting") {
+        return {
+          kind: "waiting",
+          version: orchState.version,
+          scope: orchState.diff.scope,
+          action: orchState.diff.action,
+        };
+      }
+      if (orchState?.kind === "applying") {
+        return {
+          kind: "installing",
+          version: orchState.version,
+          scope: orchState.diff.scope,
+          action: orchState.diff.action,
+        };
+      }
+      const bState = bundleUpdater?.state();
+      if (bState?.kind === "downloading") {
+        return {
+          kind: "downloading",
+          version: bState.version,
+          scope: "app",
+          progress: {
+            bytesDownloaded: bState.bytesDownloaded,
+            bytesTotal: bState.bytesTotal,
+            changedModules: bState.changedModules,
+          },
+        };
+      }
+      if (bState?.kind === "checking") return { kind: "checking" };
+      if (bState?.kind === "failed") {
+        return { kind: "failed", error: bState.error };
+      }
+      return shellState;
+    };
+
+    const versionInfo = async (): Promise<DesktopVersionInfo> => {
+      const cfg = ctx.config.get();
+      const current = await bundleStore?.readCurrent();
+      const notice = orchestrator?.rollbackNotice();
+      return {
+        shellVersion: app.getVersion(),
+        appVersion: current?.appVersion ?? app.getVersion(),
+        channel: cfg.updateChannel ?? "stable",
+        ...(notice ? { rollbackNotice: notice } : {}),
+      };
+    };
+
+    handle(IPC.updateState, () => mergedUpdateState());
+    handle(IPC.updateInstall, async () => {
+      const orchState = orchestrator?.state();
+      if (
+        updater.state().kind === "idle" &&
+        (orchState?.kind === "ready" || orchState?.kind === "waiting")
+      ) {
+        await orchestrator!.applyStaged();
+        return;
+      }
+      await updater.install();
+    });
+    handle(IPC.updateCheck, async () => {
+      await Promise.all([updater.check(), bundleUpdater?.check()]);
+    });
+    handle(IPC.updateInfo, () => versionInfo());
+    handle(IPC.updateSetChannel, async (channel) => {
+      const parsed = channelInput.parse(channel);
+      ctx.config.update({ updateChannel: parsed });
+      void bundleUpdater?.check();
+      return versionInfo();
+    });
+    handle(IPC.updateReloadPage, () => {
+      windows.webContents()?.reloadIgnoringCache();
+    });
+    handle(IPC.updateDismissRollback, () => {
+      orchestrator?.dismissRollbackNotice();
+    });
 
     const permissions = this.#permissions;
     if (permissions)
@@ -237,17 +340,17 @@ export class DesktopIpcModule implements Module {
     const push = (): void => {
       windows.webContents()?.send(IPC.computerStatusEvent, status());
     };
+    const pushUpdate = (): void => {
+      windows.webContents()?.send(IPC.updateStateEvent, mergedUpdateState());
+    };
     this.#unsubscribe.push(
       ctx.bus.on("computer.connection", push),
       ctx.bus.on("runtime.state", push),
       ctx.bus.on("runtime.activity", push),
       ctx.bus.on("power.changed", push),
       ctx.bus.on("computer.changed", push),
-      ctx.bus.on("update.changed", () =>
-        windows
-          .webContents()
-          ?.send(IPC.updateStateEvent, updateView(updater.state())),
-      ),
+      ctx.bus.on("update.changed", pushUpdate),
+      ctx.bus.on("bundle.update_changed", pushUpdate),
     );
   }
 

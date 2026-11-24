@@ -18,6 +18,8 @@ import {
 import { lingerHome } from "@linger/local-installation/home";
 
 import { quitRequested } from "./app-window.js";
+import { BundleStoreModule } from "./bundle-store.js";
+import { BundleUpdaterModule } from "./bundle-updater.js";
 import { CredentialStore } from "./computer-credential.js";
 import {
   ComputerDaemonModule,
@@ -29,6 +31,7 @@ import { DesktopIpcModule } from "./desktop-ipc.js";
 import { dialogMessages } from "./dialogs.messages.js";
 import { DiagnosticsModule } from "./diagnostics.js";
 import { EnrollmentModule } from "./enrollment.js";
+import { HealthWatchdogModule } from "./health-watchdog.js";
 import { LanguageModule } from "./language.js";
 import {
   LocalServerModule,
@@ -47,6 +50,7 @@ import { EventBus, ModuleHost, type Module } from "./modules.js";
 import { parseServerUrl } from "./navigation.js";
 import { openWithXdg } from "./open-url.js";
 import { PowerGuardModule, type PowerApi } from "./power-guard.js";
+import { ReleaseOrchestratorModule } from "./release-orchestrator.js";
 import { SetupWindowModule } from "./setup-window.js";
 import { loginShellEnvironment, withLoginShell } from "./shell-env.js";
 import { markStartMenuShortcut } from "./start-menu-shortcut.js";
@@ -138,6 +142,7 @@ async function main(): Promise<void> {
     path.join(userData, "config.json"),
     envServer ? { serverUrl: envServer } : {},
   );
+  config.ensureInstallId();
   const defaultDisplayName = os.hostname();
   const daemonDirectory = path.join(userData, "computer");
   const credentials = new CredentialStore(
@@ -283,6 +288,84 @@ async function main(): Promise<void> {
           },
         }
       : undefined;
+  const computerDaemon = new ComputerDaemonModule({
+    spawn: spawnDaemon(
+      daemonExecutable(),
+      path.join(userData, "logs", "computer-daemon.log"),
+    ),
+    credentials,
+    directory: daemonDirectory,
+    // The bundled teamhub CLI, run by the app's own Node, so runtimes reply
+    // with a matching version and the computer needs no Node.
+    teamhubCliDirectory: path.join(here, "../teamhub-cli"),
+    defaultDisplayName,
+    env: daemonEnv(log),
+    ...(process.platform === "win32"
+      ? { protect: protectWithDaemon(daemonExecutable()) }
+      : {}),
+    ...desktopPermissions,
+  });
+  const bundleStore = new BundleStoreModule({
+    home,
+    seedDirectory: path.join(here, "../seed"),
+    target: `${process.platform}-${process.arch}`,
+  });
+  const bundleUpdater = new BundleUpdaterModule({
+    shellVersion: VERSION,
+    target: `${process.platform}-${process.arch}`,
+    enabled: app.isPackaged || process.env.LINGER_ENABLE_BUNDLE_UPDATER === "1",
+  });
+  const healthWatchdog = new HealthWatchdogModule();
+  const releaseOrchestrator = new ReleaseOrchestratorModule({
+    activeOperations: () => computerDaemon.running(),
+    restartServices: async (release, changed) => {
+      if (changed.includes("computer-daemon")) {
+        const daemonDir = path.join(home, release.modules["computer-daemon"].path);
+        const daemonExe = path.join(
+          daemonDir,
+          process.platform === "win32"
+            ? "linger-computer-daemon.exe"
+            : "linger-computer-daemon",
+        );
+        const sharedNode = path.join(
+          home,
+          release.infra.node,
+          "bin",
+          process.platform === "win32" ? "node.exe" : "node",
+        );
+        computerDaemon.reloadBinary({
+          spawn: spawnDaemon(
+            daemonExe,
+            path.join(userData, "logs", "computer-daemon.log"),
+          ),
+          teamhubCliDirectory: path.join(daemonDir, "teamhub-cli"),
+          extraEnv: { LINGER_TOOLS_NODE_PATH: sharedNode },
+          whenIdle: false,
+        });
+      }
+      log.info("release_orchestrator.services_restarted", {
+        appVersion: release.appVersion,
+        changed,
+      });
+    },
+    buildHealthProbes: (_release, changed) => {
+      const origin = config.get().serverUrl;
+      if (!origin) return [];
+      const probes = [];
+      if (changed.includes("web") || changed.includes("teamhub")) {
+        probes.push({
+          name: "web-healthz",
+          check: async () => {
+            const res = await fetch(new URL("/healthz", origin)).catch(
+              () => undefined,
+            );
+            return res?.ok ?? false;
+          },
+        });
+      }
+      return probes;
+    },
+  });
   const modules: Module[] = [
     {
       name: "Config",
@@ -290,6 +373,8 @@ async function main(): Promise<void> {
       start: async () => {},
       stop: async () => {},
     },
+    bundleStore,
+    healthWatchdog,
     language,
     new EnrollmentModule({
       defaultDisplayName,
@@ -310,27 +395,13 @@ async function main(): Promise<void> {
       },
       defaultDirectory: path.join(app.getPath("home"), "Linger"),
     }),
-    new ComputerDaemonModule({
-      spawn: spawnDaemon(
-        daemonExecutable(),
-        path.join(userData, "logs", "computer-daemon.log"),
-      ),
-      credentials,
-      directory: daemonDirectory,
-      // The bundled teamhub CLI, run by the app's own Node, so runtimes reply
-      // with a matching version and the computer needs no Node.
-      teamhubCliDirectory: path.join(here, "../teamhub-cli"),
-      defaultDisplayName,
-      env: daemonEnv(log),
-      ...(process.platform === "win32"
-        ? { protect: protectWithDaemon(daemonExecutable()) }
-        : {}),
-      ...desktopPermissions,
-    }),
+    computerDaemon,
     status,
     new PowerGuardModule(electronPower()),
     windows,
     localServer,
+    bundleUpdater,
+    releaseOrchestrator,
     new DiagnosticsModule({
       userData,
       logs: path.join(userData, "logs"),
