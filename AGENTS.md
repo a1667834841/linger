@@ -41,7 +41,7 @@ Memory, and Voice services.
   Memory, and LLM Wiki share one HTTP port; the Document Runtime is the
   Hocuspocus/Yjs protocol and BlockNote/Yjs computation adapter on its own
   port, and it loads and saves native Documents' `document_bodies` rows in
-  TeamHub's database. Voice supervises isolated ASR, recorder and Live workers from the voice-runtime package. TeamHub parses SKILL.md itself.
+  TeamHub's database. Voice supervises isolated ASR, recorder, Live and Bridge workers from the voice-runtime package. TeamHub parses SKILL.md itself.
 - `apps/teamhub-cli`: standalone Agent CLI calling TeamHub business APIs directly
   through the client generated from `teamhub-agent-api`; it owns its command
   schemas and host file helpers.

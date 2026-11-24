@@ -12,6 +12,9 @@ allowBuilds:
   better-sqlite3: true
   esbuild: true
   protobufjs: false
+  # The Mobile App disables code highlighting and math, the only assets its
+  # install script would download.
+  react-native-enriched-markdown: false
   sharp: true
   tesseract.js: false
 minimumReleaseAgeExclude:

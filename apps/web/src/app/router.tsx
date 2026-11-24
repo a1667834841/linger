@@ -763,6 +763,13 @@ function createSettingsRoute(): RouteObject {
       },
       {
         lazy: async () => ({
+          Component: (await import("@/features/settings/phones-settings-page"))
+            .PhonesSettingsPage,
+        }),
+        path: "phones",
+      },
+      {
+        lazy: async () => ({
           Component: (
             await import("@/features/settings/language-settings-page")
           ).LanguageSettingsPage,

@@ -9,7 +9,7 @@ import {
   type VoiceWorker,
   type VoiceWorkerSpawn,
 } from "../src/voice/service.js";
-import type { HttpHost, HttpRoute } from "../src/http-host.js";
+import type { HttpHost, HttpRoute, UpgradeHandler } from "../src/http-host.js";
 
 class Worker extends EventEmitter {
   kill = vi.fn(() => true);
@@ -66,12 +66,18 @@ async function harness(
   const log = vi.fn();
   let route: HttpRoute | undefined;
   const unmount = vi.fn();
+  const upgrades = new Map<string, UpgradeHandler>();
+  const bridges: { spec: VoiceWorkerSpawn; child: Worker }[] = [];
   const service = await startVoiceService({
     logger: { log } as unknown as JsonLogger,
     http: {
       mount: (mounted: HttpRoute) => {
         route = mounted;
         return unmount;
+      },
+      mountUpgrade: (path: string, handler: UpgradeHandler) => {
+        upgrades.set(path, handler);
+        return () => upgrades.delete(path);
       },
     } as unknown as HttpHost,
     environment: { ...environment, ...options.env },
@@ -84,7 +90,9 @@ async function harness(
     allocatePort: async () => nextPort++,
     spawnWorker: (worker, spec) => {
       const child = new Worker();
-      spawned.push({ worker, spec, child });
+      // The Bridge runs whatever the keys say; tests of it read `bridges`.
+      if (worker === "bridge") bridges.push({ spec, child });
+      else spawned.push({ worker, spec, child });
       return child as unknown as ChildProcess;
     },
   });
@@ -93,7 +101,8 @@ async function harness(
     spawned.filter((entry) => entry.worker === worker);
   const shutdown = async () => {
     const stopped = service.stop();
-    for (const { child } of spawned) child.emit("exit", 0, null);
+    for (const { child } of [...spawned, ...bridges])
+      child.emit("exit", 0, null);
     await stopped;
   };
   return {
@@ -107,6 +116,8 @@ async function harness(
     route: route!,
     unmount,
     probed,
+    bridges,
+    upgrades,
   };
 }
 
@@ -143,8 +154,8 @@ describe("voice worker reconcile", () => {
     expect(of("recorder")[0]!.spec.args).toContain("--recorder");
     // Each process gets its own free health port, not a fixed one.
     expect(spawned.map(({ spec }) => spec.env.VOICE_WORKER_PORT)).toEqual([
-      "40000",
       "40001",
+      "40002",
     ]);
     teamHub.keys = { soniox_api_key: SONIOX, xai_api_key: XAI };
     await service.reconcile();
@@ -423,7 +434,7 @@ describe("voice worker reconcile", () => {
   });
 
   it("restarts only the failed worker and drains all media before returning", async () => {
-    const { of, service, unmount, teamHub } = await harness({
+    const { of, service, unmount, teamHub, bridges } = await harness({
       keys: { soniox_api_key: SONIOX, xai_api_key: XAI },
     });
     of("live")[0]!.child.emit("exit", 1, null);
@@ -442,6 +453,7 @@ describe("voice worker reconcile", () => {
     await vi.advanceTimersByTimeAsync(2000);
     expect(drained).toBe(false);
     of("recorder")[0]!.child.emit("exit", 0, null);
+    bridges[0]!.child.emit("exit", 0, null);
     await stopping;
     const calls = teamHub.calls;
     await vi.advanceTimersByTimeAsync(VOICE_RECONCILE_POLL_MS * 2);

@@ -14,10 +14,13 @@ import {
   modelPackagesRoot,
 } from "../model-packages.js";
 import { hasBearerToken } from "../service-bearer-auth.js";
+import { proxyVoiceBridge, VOICE_BRIDGE_PATH } from "./bridge-proxy.js";
 import { readVoiceConfig, type VoiceConfig } from "./config.js";
 
-export type VoiceWorker = "asr" | "recorder" | "live";
-const VOICE_WORKERS = ["asr", "recorder", "live"] as const;
+export type VoiceWorker = "asr" | "recorder" | "live" | "bridge";
+/** Workers that run on a provider key; the Bridge needs none. */
+const PROVIDER_WORKERS = ["asr", "recorder", "live"] as const;
+const VOICE_WORKERS = [...PROVIDER_WORKERS, "bridge"] as const;
 // LiveKit drains for 2 s, then allows jobs 68 s to save their final media.
 export const VOICE_DRAIN_MS = 72_000;
 /** Catches a reconcile notification that TeamHub could not deliver. */
@@ -165,6 +168,7 @@ export async function startVoiceService(options: {
     : {};
   let stopping = false;
   const stopped = new AbortController();
+  const bridgeSockets = new Set<{ terminate(): void }>();
   const entries = new Map<
     VoiceWorker,
     {
@@ -231,7 +235,7 @@ export async function startVoiceService(options: {
         Math.min(30_000, 1_000 * 2 ** Math.min(entry.failures - 1, 5)),
       );
     }
-    if (!modelPackagesInstalled(models, env)) {
+    if (worker !== "bridge" && !modelPackagesInstalled(models, env)) {
       install().then(() => {
         if (current()) start(worker);
       }, restart);
@@ -291,7 +295,7 @@ export async function startVoiceService(options: {
   };
   const apply = (keys: ProviderKeys) => {
     const wanted = workerKeys(keys);
-    for (const worker of VOICE_WORKERS) {
+    for (const worker of PROVIDER_WORKERS) {
       const entry = entries.get(worker)!;
       const key = wanted.get(worker);
       const digest = key ? sha256Hex(key.key) : undefined;
@@ -359,8 +363,29 @@ export async function startVoiceService(options: {
   // TeamHub may still be starting; a failed first reconcile retries on the poll.
   void reconcile();
   const poll = setInterval(() => void reconcile(), VOICE_RECONCILE_POLL_MS);
+  // The Bridge runs for as long as the role does, keyed by a token only this
+  // process and the Bridge know; TeamHub's reconcile never touches it.
+  const bridgeToken = randomBytes(32).toString("base64url");
+  const bridge = entries.get("bridge")!;
+  bridge.key = { variable: "VOICE_BRIDGE_TOKEN", key: bridgeToken };
+  start("bridge");
+  const bridgeTarget = () =>
+    bridge.child && bridge.childGeneration === bridge.generation
+      ? { port: bridge.port!, token: bridgeToken }
+      : undefined;
+  const unmountBridge = options.http.mountUpgrade(
+    VOICE_BRIDGE_PATH,
+    proxyVoiceBridge({
+      credential: config.managementCredential,
+      target: bridgeTarget,
+      logger: options.logger,
+      sockets: bridgeSockets,
+    }),
+  );
+  // Readiness and the reconcile answer track the provider workers that a
+  // voice session dispatch needs.
   const wantedWorkers = () =>
-    VOICE_WORKERS.filter((worker) => entries.get(worker)!.key);
+    PROVIDER_WORKERS.filter((worker) => entries.get(worker)!.key);
   const workersReady = async () =>
     (
       await Promise.all(
@@ -443,6 +468,8 @@ export async function startVoiceService(options: {
       stopped.abort();
       clearInterval(poll);
       unmount();
+      unmountBridge();
+      for (const socket of bridgeSockets) socket.terminate();
       // Signal all workers together, so recorder flushing never waits for ASR.
       await Promise.all(
         [...entries.values()].map(async (entry) => {

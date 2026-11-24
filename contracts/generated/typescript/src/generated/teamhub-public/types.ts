@@ -102,6 +102,158 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v0/me/phone-pairings": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create a one-time code a Mobile App scans to pair with this computer.
+     * @description The invite inside the code works once and for ten minutes. Answers 503 MOBILE_UNAVAILABLE when the deployment has no secret seed, so it has no computer key.
+     */
+    post: operations["createPhonePairingCode"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/me/phones": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the phones paired with this computer. */
+    get: operations["listPairedPhones"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/me/phones/{phoneId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        phoneId: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Remove a paired phone.
+     * @description Revokes the phone's device Session and closes its live sessions at once. The phone must pair again with a new code.
+     */
+    delete: operations["removePairedPhone"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/me/phones/{phoneId}/approve": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        phoneId: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Approve a pending phone after comparing its confirmation code.
+     * @description Creates the phone's device Session and lets its live sessions work. Answers 404 when the phone is not pending, for example because it waited longer than ten minutes.
+     */
+    post: operations["approvePairedPhone"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/me/phone/push-grant": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Register the calling phone's push grant for this computer.
+     * @description Only a paired phone may call it, through its session; other callers get 403 PHONE_ONLY. The grant comes from the Push Service and never contains the phone's push token in readable form. Pushes carry an event kind and IDs, never content. A service_url other than the Push Service this computer trusts (TEAMHUB_MOBILE_PUSH_SERVICE_URL) gets 400 PUSH_SERVICE_NOT_ALLOWED.
+     */
+    put: operations["putPhonePushGrant"];
+    post?: never;
+    /** Stop pushes to the calling phone. */
+    delete: operations["deletePhonePushGrant"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/mobile/relays": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the Relay nodes this computer keeps links to.
+     * @description Answers 503 MOBILE_UNAVAILABLE when the deployment has no secret seed.
+     */
+    get: operations["listMobileRelayNodes"];
+    put?: never;
+    /**
+     * Add a custom Relay node; the computer links to it at once.
+     * @description Answers 400 INVALID_RELAY_URL for anything but a ws or wss origin without path, query or credentials, 409 RELAY_EXISTS when the list already has the URL, 409 TOO_MANY_RELAYS when it already has eight custom nodes, 403 RELAY_PRIVATE_FROM_PHONE when a Paired Phone names a host on a loopback, private or link-local address, and 503 MOBILE_UNAVAILABLE without a secret seed.
+     */
+    post: operations["createMobileRelayNode"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/mobile/relays/{relayId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        relayId: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Remove a custom Relay node.
+     * @description Answers 409 RELAY_OFFICIAL for an official node, which can only be turned off.
+     */
+    delete: operations["removeMobileRelayNode"];
+    options?: never;
+    head?: never;
+    /**
+     * Turn a Relay node on or off.
+     * @description The computer links to an enabled node and drops its link to a disabled one at once; phones stop using a node they can no longer reach.
+     */
+    patch: operations["updateMobileRelayNode"];
+    trace?: never;
+  };
   "/v0/events": {
     parameters: {
       query?: never;
@@ -1370,7 +1522,7 @@ export interface paths {
     put?: never;
     /**
      * Answer a pending decision card.
-     * @description Only the card's decision owner may decide, except that any member may decide a room_creation an Agent visible to the whole workspace asked for. A caller who is not a member of the card's Room gets 404; a member who may not decide gets 403. A decision that is no longer pending, has expired, or whose card version differs gets 409, and so does an answer to a Runtime question whose Run has ended. TeamHub runs what an approval allows once, after this request returns, and tells the requesting Agent the result; a room_creation creates its Room in this request. A connection_auth approval names the Connection the Human chose and ends authorizing until its OAuth completes. An AnotherMe sources card's answer becomes the Human's own Message in the same request; its uploads fail as message creation does. A repeated submission carries a stale card version and gets 409.
+     * @description Only the card's decision owner may decide, except that any member may decide a room_creation an Agent visible to the whole workspace asked for. A caller who is not a member of the card's Room gets 404; a member who may not decide gets 403. A decision that is no longer pending, has expired, or whose card version differs gets 409, and so does an answer to a Runtime question whose Run has ended. TeamHub runs what an approval allows once, after this request returns, and tells the requesting Agent the result; a room_creation creates its Room in this request. A connection_auth approval names the Connection the Human chose and ends authorizing until its OAuth completes. An AnotherMe sources card's answer becomes the Human's own Message in the same request; its uploads fail as message creation does. A repeated submission carries a stale card version and gets 409. Through a Paired Phone's session only question, runtime_permission, connector_write and agent_change cards may be answered; any other kind gets 403 DECIDE_ON_COMPUTER.
      */
     post: operations["decideDecision"];
     delete?: never;
@@ -4325,6 +4477,88 @@ export interface components {
       /** @description Unpadded base64url HMAC-SHA256 of the challenge. */
       proof: string;
     };
+    /** @description A Relay node a phone may reach this computer through. */
+    MobileRelayEndpoint: {
+      id: string;
+      /** @description ws or wss origin of the node. */
+      url: string;
+      label: string;
+    };
+    /** @description A one-time code a Mobile App scans to pair with this computer. The URI carries the computer's public key and an invite that works once and only until expires_at; docs/mobile.md defines its format. */
+    PhonePairingCode: {
+      /** @description linger://pair?d=<base64url JSON>; show it as a QR code. */
+      pairing_uri: string;
+      /** Format: date-time */
+      expires_at: string;
+      computer_name: string;
+      /** @description Lowercase hex Host ID the Relay routes this computer by. */
+      host_id: string;
+      /** @description Origin of the first Relay node this computer keeps a link to, for clients that know only one; absent when it keeps none. */
+      relay_url?: string;
+      /** @description Every Relay node this computer keeps a link to now, in list order. */
+      relays?: components["schemas"]["MobileRelayEndpoint"][];
+      /** @description ws origins the computer answers on in the local network now. */
+      lan_urls: string[];
+    };
+    /** @enum {string} */
+    PhonePlatform: "ios" | "android";
+    PairedPhone: {
+      id: string;
+      name: string;
+      platform: components["schemas"]["PhonePlatform"];
+      /**
+       * @description A pending phone waits for the Human to compare its code and approve it; it can do nothing until then.
+       * @enum {string}
+       */
+      status: "pending" | "approved";
+      /** @description The six digits the pending phone shows; absent once approved. */
+      confirmation_code?: string;
+      /** Format: date-time */
+      paired_at: string;
+      /** Format: date-time */
+      last_seen_at: string;
+      /** @description The phone holds a live session with this computer now. */
+      connected: boolean;
+      /** @description The phone registered a push token. */
+      push_enabled: boolean;
+    };
+    PairedPhoneList: {
+      items: components["schemas"]["PairedPhone"][];
+    };
+    PhonePushGrantRequest: {
+      /** @description The Push Service that issued the grant; TeamHub sends this phone's alerts there. */
+      service_url: string;
+      /** @description The sealed push grant the Push Service issued to this phone for this computer. */
+      grant: string;
+    };
+    /** @description A Relay node in this computer's list. The computer keeps one link to every enabled node, so a phone can reach it through any of them. */
+    MobileRelayNode: {
+      id: string;
+      /** @description ws or wss origin of the node. */
+      url: string;
+      label: string;
+      /**
+       * @description Official nodes ship with Linger and can be turned off but not removed.
+       * @enum {string}
+       */
+      kind: "official" | "custom";
+      enabled: boolean;
+      /** @description The computer's link to this node is up now. */
+      connected: boolean;
+    };
+    MobileRelayNodeList: {
+      items: components["schemas"]["MobileRelayNode"][];
+      /** @description TEAMHUB_MOBILE_RELAY_URL is set empty on this computer, or it runs on the public development seed, so it keeps no Relay link whatever the list says. */
+      links_off: boolean;
+    };
+    CreateMobileRelayNodeRequest: {
+      /** @description ws or wss origin of a Relay node, such as ws://203.0.113.7:7787. Plain ws is allowed: the session through it is end-to-end encrypted. */
+      url: string;
+      label?: string;
+    };
+    UpdateMobileRelayNodeRequest: {
+      enabled: boolean;
+    };
     PasswordChangeRequest: {
       current_password: string;
       /** @description 8-1024 UTF-8 bytes. TeamHub counts bytes; minLength and maxLength count characters, so they bound the byte rule only loosely. */
@@ -6838,8 +7072,15 @@ export interface components {
       /** Format: int64 */
       partial_end_offset_ms?: number;
     };
+    /**
+     * @description The client that publishes the microphone. A mobile Live session has no page, so the live voice offers no page tools.
+     * @default web
+     * @enum {string}
+     */
+    VoiceSessionClient: "web" | "mobile";
     VoiceSessionCreateRequest: {
       purpose: components["schemas"]["VoiceSessionPurpose"];
+      client?: components["schemas"]["VoiceSessionClient"];
     };
     VoiceProviderKeyStatus: {
       /**
@@ -8677,8 +8918,8 @@ export interface components {
         "application/json": components["schemas"]["ErrorResponse"];
       };
     };
-    /** @description The request conflicts with current state or a prior idempotent request. */
-    Conflict: {
+    /** @description The authenticated principal cannot perform this action in the Tenant or Run. */
+    Forbidden: {
       headers: {
         [name: string]: unknown;
       };
@@ -8686,8 +8927,8 @@ export interface components {
         "application/json": components["schemas"]["ErrorResponse"];
       };
     };
-    /** @description The authenticated principal cannot perform this action in the Tenant or Run. */
-    Forbidden: {
+    /** @description The request conflicts with current state or a prior idempotent request. */
+    Conflict: {
       headers: {
         [name: string]: unknown;
       };
@@ -8966,6 +9207,300 @@ export interface operations {
         };
       };
       401: components["responses"]["Unauthenticated"];
+    };
+  };
+  createPhonePairingCode: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Pairing code created. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PhonePairingCode"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["Forbidden"];
+      /** @description The Mobile Gateway is not configured. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  listPairedPhones: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paired phones, newest first; removed phones are not listed. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PairedPhoneList"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+    };
+  };
+  removePairedPhone: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        phoneId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The phone was removed, or was already gone. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+    };
+  };
+  approvePairedPhone: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        phoneId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The phone was approved. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+    };
+  };
+  putPhonePushGrant: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PhonePushGrantRequest"];
+      };
+    };
+    responses: {
+      /** @description Grant saved. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["Forbidden"];
+    };
+  };
+  deletePhonePushGrant: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Grant cleared. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["Forbidden"];
+    };
+  };
+  listMobileRelayNodes: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Official nodes first, then custom ones in the order they were added. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MobileRelayNodeList"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      /** @description The Mobile Gateway is not configured. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  createMobileRelayNode: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateMobileRelayNodeRequest"];
+      };
+    };
+    responses: {
+      /** @description The node was added and enabled. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MobileRelayNode"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["Forbidden"];
+      /** @description The list already has this URL, or eight custom nodes. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description The Mobile Gateway is not configured. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  removeMobileRelayNode: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        relayId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The node was removed, or was already gone. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components["responses"]["Unauthenticated"];
+      /** @description Official nodes cannot be removed. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description The Mobile Gateway is not configured. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  updateMobileRelayNode: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        relayId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdateMobileRelayNodeRequest"];
+      };
+    };
+    responses: {
+      /** @description The node as it is now. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MobileRelayNode"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+      /** @description The Mobile Gateway is not configured. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
     };
   };
   streamEvents: {

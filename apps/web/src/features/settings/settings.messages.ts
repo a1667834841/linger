@@ -8,6 +8,7 @@ export const settingsMessages = defineMessages("settings", {
   security: "Security",
   computers: "Computers",
   models: "Models",
+  phones: "Phones",
   language: "Language",
   loadingComputers: "Loading Computers",
   loadingContent: "Loading content",

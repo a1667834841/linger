@@ -49,6 +49,14 @@ func (a *App) createVoiceSession(c *gin.Context) {
 		a.writeError(c, http.StatusBadRequest, "INVALID_VOICE_PURPOSE", "Voice session purpose is invalid")
 		return
 	}
+	client := voicemedia.ClientWeb
+	if request.Client != nil {
+		client = string(*request.Client)
+	}
+	if client != voicemedia.ClientWeb && client != voicemedia.ClientMobile {
+		a.writeError(c, http.StatusBadRequest, "INVALID_VOICE_CLIENT", "Voice session client is invalid")
+		return
+	}
 	// Live runs on xAI alone; every other purpose transcribes with Soniox.
 	// The key is read now, so one saved a moment ago already counts.
 	provider := voicekey.Soniox
@@ -64,7 +72,7 @@ func (a *App) createVoiceSession(c *gin.Context) {
 	}
 	session, err := a.voiceMedia.CreateVoiceSession(c.Request.Context(), voicemedia.CreateVoiceSessionRequest{
 		AccountID: currentPrincipal(c).Session.AccountID, AuthSessionID: currentPrincipal(c).Session.ID,
-		RoomID: c.Param("roomId"), Purpose: purpose,
+		RoomID: c.Param("roomId"), Purpose: purpose, Client: client,
 	})
 	if a.writeVoiceMediaError(c, "create VoiceSession", err) {
 		return
