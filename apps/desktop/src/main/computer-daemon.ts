@@ -21,6 +21,11 @@ import type {
   CredentialStore,
 } from "./computer-credential.js";
 import type { DesktopConfig } from "./config.js";
+import {
+  applyDevLocalmodelsEnvironment,
+  ensureDevLocalmodelsDirectories,
+  type DevLocalmodelsOverride,
+} from "./dev-localmodels.js";
 import type { Module, ModuleContext } from "./modules.js";
 import {
   SYSTEM_PERMISSION_IDS,
@@ -73,6 +78,12 @@ export interface ComputerDaemonOptions {
   // ACL before the first launch. Only set on Windows, where Node's file modes
   // do nothing and the daemon refuses a config other users could read.
   readonly protect?: (directories: readonly string[]) => Promise<void>;
+  // Development override pointing the daemon's localmodels runner at a local
+  // llm-inference-lab checkout, even when connecting directly to `pnpm dev`.
+  readonly devLocalmodels?: DevLocalmodelsOverride;
+  // Default LINGER_HOME used to derive state and models directories when
+  // devLocalmodels runs without Quick Install's runtimeEnvironment.
+  readonly home?: string;
 }
 
 // The stdio features this Desktop offers the daemon in its hello line.
@@ -369,7 +380,17 @@ export class ComputerDaemonModule implements Module {
         this.#setState("stopped");
         return;
       }
-      const env = daemonEnvironment(this.#env, config.runtimeEnvironment);
+      const baseEnv = daemonEnvironment(this.#env, config.runtimeEnvironment);
+      const env =
+        this.#options.devLocalmodels && this.#options.home
+          ? applyDevLocalmodelsEnvironment(
+              baseEnv,
+              this.#options.devLocalmodels,
+              this.#options.home,
+            )
+          : baseEnv;
+      if (this.#options.devLocalmodels && this.#options.home)
+        ensureDevLocalmodelsDirectories(env);
       const credential = this.#options.credentials.read();
       if (credential?.computerId !== config.computerId) {
         // Reconnecting this computer stores a new credential.
