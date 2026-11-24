@@ -70,6 +70,39 @@ func chromeExecutable(env []string) string {
 			}
 		}
 	}
+	return firstFile(candidates)
+}
+
+// managedBrowserExecutable returns the browser the Agent profile runs in:
+// Google Chrome, or on macOS and Windows Microsoft Edge when Chrome is not
+// installed. Edge is Chromium, so it takes the same flags and CDP.
+func managedBrowserExecutable(env []string) string {
+	if chrome := chromeExecutable(env); chrome != "" {
+		return chrome
+	}
+	return edgeExecutable(env)
+}
+
+// edgeExecutable returns the installed Microsoft Edge on macOS and Windows.
+func edgeExecutable(env []string) string {
+	var candidates []string
+	switch runtime.GOOS {
+	case "darwin":
+		candidates = []string{"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"}
+		if home := environmentValue(env, "HOME"); home != "" {
+			candidates = append(candidates, filepath.Join(home, "Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"))
+		}
+	case "windows":
+		for _, root := range []string{"PROGRAMFILES(X86)", "PROGRAMFILES", "PROGRAMW6432", "LOCALAPPDATA"} {
+			if base := environmentValue(env, root); base != "" {
+				candidates = append(candidates, filepath.Join(base, "Microsoft", "Edge", "Application", "msedge.exe"))
+			}
+		}
+	}
+	return firstFile(candidates)
+}
+
+func firstFile(candidates []string) string {
 	for _, candidate := range candidates {
 		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() {
 			return candidate

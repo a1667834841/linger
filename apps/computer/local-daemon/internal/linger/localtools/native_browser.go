@@ -29,6 +29,10 @@ var (
 	nativeBrowserGracefulCloseLimit = 2 * time.Second
 )
 
+// errNoManagedBrowser fails a browser call before anything ran: the
+// Computer has no browser the Agent profile can run in.
+var errNoManagedBrowser = errors.New("BROWSER_UNAVAILABLE: install Google Chrome, Chromium or Microsoft Edge to use the managed browser")
+
 type nativeBrowser struct {
 	endpoint          string
 	webSocketEndpoint string
@@ -58,9 +62,9 @@ func (m *Manager) nativeBrowserFor(ctx context.Context, agentID string) (*native
 	m.mu.Unlock()
 	// This is a dedicated Agent profile, never the user's default Chrome
 	// profile. Cua observes the same native window Playwright attaches to.
-	executable := chromeExecutable(m.env)
+	executable := managedBrowserExecutable(m.env)
 	if executable == "" {
-		return nil, errors.New("BROWSER_UNAVAILABLE: install Google Chrome or Chromium to use the managed browser")
+		return nil, errNoManagedBrowser
 	}
 	if err := checkBrowserDisplay(m.env); err != nil {
 		return nil, err

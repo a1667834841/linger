@@ -233,7 +233,7 @@ func inspectBrowserMode(homeDirectory string, environment map[string]string, goo
 	check := func(status, detail string) doctorCheck {
 		return doctorCheck{Name: "browser", Category: categoryConfiguration, Status: status, Detail: detail}
 	}
-	var executables []string
+	var executables, edgeExecutables []string
 	userData := ""
 	switch goos {
 	case "darwin":
@@ -241,11 +241,16 @@ func inspectBrowserMode(homeDirectory string, environment map[string]string, goo
 			"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
 			filepath.Join(homeDirectory, "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
 		}
+		edgeExecutables = []string{
+			"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+			filepath.Join(homeDirectory, "Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
+		}
 		userData = filepath.Join(homeDirectory, "Library", "Application Support", "Google", "Chrome")
 	case "windows":
 		for _, name := range []string{"LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432"} {
 			if base := environmentValue(environment, name); base != "" {
 				executables = append(executables, filepath.Join(base, "Google", "Chrome", "Application", "chrome.exe"))
+				edgeExecutables = append(edgeExecutables, filepath.Join(base, "Microsoft", "Edge", "Application", "msedge.exe"))
 			}
 		}
 		if local := environmentValue(environment, "LOCALAPPDATA"); local != "" {
@@ -254,19 +259,25 @@ func inspectBrowserMode(homeDirectory string, environment map[string]string, goo
 	default:
 		return check("pass", "Browser tools use the Chrome inside each Agent desktop on this Computer")
 	}
-	chrome := false
-	for _, executable := range executables {
-		if info, err := os.Stat(executable); err == nil && info.Mode().IsRegular() {
-			chrome = true
+	if !anyFile(executables) {
+		if anyFile(edgeExecutables) {
+			return check("pass", "Google Chrome is not installed; Agents use a dedicated Microsoft Edge profile without your sign-ins. Install Google Chrome to connect your everyday browser")
 		}
-	}
-	if !chrome {
-		return check("warn", "Google Chrome is not installed, so browser tools are unavailable; desktop and file tools are unaffected")
+		return check("warn", "Neither Google Chrome nor Microsoft Edge is installed, so browser tools are unavailable; desktop and file tools are unaffected")
 	}
 	if profiles := profilesWithExtension(userData); len(profiles) > 0 {
 		return check("pass", "Google Chrome found; the Playwright Extension is installed in "+strings.Join(profiles, ", ")+". Connect your everyday Chrome from a Room chat with Connect my browser")
 	}
 	return check("pass", "Google Chrome found; Agents use a dedicated Chrome profile without your sign-ins. To reuse your signed-in Chrome, choose Connect my browser in a Room chat")
+}
+
+func anyFile(paths []string) bool {
+	for _, path := range paths {
+		if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
 }
 
 func profilesWithExtension(root string) []string {

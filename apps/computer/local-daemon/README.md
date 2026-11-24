@@ -834,7 +834,10 @@ every tool description and the model's tool listing would be truncated.
 
 When the default browser is not Chrome, the local browser uses a separate Agent
 profile directory, stored under `computer-tools/browser-profiles/` in the state
-directory. Cua can observe the native Chrome window that Playwright connects to.
+directory. That profile runs in Google Chrome, or on macOS and Windows in
+Microsoft Edge when Chrome is not installed. With neither, a browser call fails
+with `BROWSER_UNAVAILABLE` before anything runs, which Live reports as
+`browser_unavailable`. Cua can observe the native Chrome window that Playwright connects to.
 
 On macOS, `launch_app` with `agent_browser: true` opens the Computer's own
 browser window for a site that watches for automated browsers. The Agent drives
