@@ -146,9 +146,9 @@ export const runtimeStatusMessages = defineMessages("runtimeStatus", {
   failureLocalModelUnavailable:
     "The Agent's Computer could not load its local model. Open the Models page on that Computer: it may need more free memory, may not be fully downloaded, or may still be loading. Then try again, or choose another model for the Agent.",
   failureContextTooLong:
-    "The conversation no longer fits the model's context window. Start a new chat with the Agent, or choose a model with a larger context window.",
+    "The conversation no longer fits the model's context window or available memory. Start a new chat with the Agent, reduce concurrent runs, or choose a model with a larger context window.",
   failureModelServiceError:
-    "The model service reported an internal error. Try again in a moment; if it keeps failing, check the model provider's status.",
+    "The model service reported an internal error or ran out of capacity. Try again in a moment, reduce concurrent runs or start a new chat, and check the model service status if it keeps failing.",
   failureTimeout:
     "The Runtime ran past its time limit without finishing. Try again, or split the request into smaller steps.",
   failureExecutionFailed:

@@ -73,6 +73,24 @@ describe("Runtime failure messages", () => {
     expect(message).toContain("choose a stronger model");
   });
 
+  it("gives actionable recovery steps for Pi context and capacity failures", () => {
+    const overflow = runtimeFailureMessage(translate, {
+      code: "context_too_long",
+      runtime_type: "pi",
+    });
+    expect(overflow).toContain("Pi:");
+    expect(overflow).toContain("Start a new chat");
+    expect(overflow).toContain("reduce concurrent runs");
+
+    const capacity = runtimeFailureMessage(translate, {
+      code: "model_service_error",
+      runtime_type: "pi",
+    });
+    expect(capacity).toContain("Pi:");
+    expect(capacity).toContain("ran out of capacity");
+    expect(capacity).toContain("reduce concurrent runs");
+  });
+
   it("names a failure the Agent Service observed without a Runtime prefix", () => {
     expect(runtimeFailureMessage(translate, { code: "interrupted" })).toMatch(
       /^The Run stopped before it finished because its Computer restarted/,

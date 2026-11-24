@@ -124,6 +124,36 @@ func TestClassifyPiModelInvokeFailureSanitizesAndDistinguishesCauses(t *testing.
 			wantReason:  "Model invocation prompt exceeds the model context window",
 		},
 		{
+			name:        "llama-server numeric code 400 unwrapped by OpenAI SDK",
+			answerError: `400: {"code":400,"message":"request (70000 tokens) exceeds the available context size (65536 tokens)","type":"exceed_context_size_error","n_prompt_tokens":70000,"n_ctx":65536}`,
+			wantOutcome: ModelInvokeContextTooLong,
+			wantReason:  "Model invocation prompt exceeds the model context window",
+		},
+		{
+			name:        "llama-server 503 shared KV pool full",
+			answerError: `503: {"code":503,"message":"shared KV pool full","type":"unavailable_error"}`,
+			wantOutcome: ModelInvokeRuntimeUnavailable,
+			wantReason:  "Pi background model service is unavailable",
+		},
+		{
+			name:        "gateway 413 payload too large",
+			answerError: `413: {"type":"request_too_large","message":"Request exceeds the maximum size"}`,
+			wantOutcome: ModelInvokeContextTooLong,
+			wantReason:  "Model invocation prompt exceeds the model context window",
+		},
+		{
+			name:        "gateway 429 rate limit exceeded",
+			answerError: `429: {"code":"rate_limit_exceeded","type":"rate_limit_error","message":"Too many concurrent requests"}`,
+			wantOutcome: ModelInvokeRuntimeUnavailable,
+			wantReason:  "Pi background model service is unavailable",
+		},
+		{
+			name:        "plain HTTP 503 without JSON body",
+			answerError: "503 Service Unavailable",
+			wantOutcome: ModelInvokeRuntimeUnavailable,
+			wantReason:  "Pi background model service is unavailable",
+		},
+		{
 			name:        "local server POSIX ECONNREFUSED",
 			answerError: "fetch failed: connect ECONNREFUSED 127.0.0.1:18100",
 			wantOutcome: ModelInvokeRuntimeUnavailable,

@@ -915,58 +915,13 @@ var modelInvokeAuthMarkers = []string{
 
 var posixNetworkErrnoPattern = regexp.MustCompile(`\b(?:ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENETUNREACH|ENOTFOUND)\b`)
 
-type structuredAPIError struct {
-	Code    string
-	Type    string
-	Message string
-}
-
-// parseStructuredAPIError extracts a structured provider API error object
-// (`{"error":{"code":...,"type":...}}` or top-level `{"code":...,"type":...}`)
-// from a whole JSON body or a client error line carrying an embedded JSON body.
-func parseStructuredAPIError(text string) (structuredAPIError, bool) {
-	rest := strings.TrimSpace(text)
-	for len(rest) > 0 {
-		idx := strings.IndexByte(rest, '{')
-		if idx < 0 {
-			return structuredAPIError{}, false
-		}
-		rest = rest[idx:]
-		var body struct {
-			Code    string `json:"code"`
-			Type    string `json:"type"`
-			Message string `json:"message"`
-			Error   *struct {
-				Code    string `json:"code"`
-				Type    string `json:"type"`
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		dec := json.NewDecoder(strings.NewReader(rest))
-		if err := dec.Decode(&body); err == nil {
-			if body.Error != nil && (body.Error.Code != "" || body.Error.Type != "") {
-				return structuredAPIError{
-					Code:    strings.TrimSpace(body.Error.Code),
-					Type:    strings.TrimSpace(body.Error.Type),
-					Message: strings.TrimSpace(body.Error.Message),
-				}, true
-			}
-			if body.Code != "" {
-				return structuredAPIError{
-					Code:    strings.TrimSpace(body.Code),
-					Type:    strings.TrimSpace(body.Type),
-					Message: strings.TrimSpace(body.Message),
-				}, true
-			}
-		}
-		rest = rest[1:]
-	}
-	return structuredAPIError{}, false
+func parseStructuredAPIError(text string) (native.StructuredAPIError, bool) {
+	return native.ParseStructuredAPIError(text)
 }
 
 func isContextTooLongErrorCode(code string) bool {
 	switch code {
-	case "exceed_context_size_error", "context_length_exceeded", "context_window_exceeded", "contextWindowExceeded", "prompt_too_long":
+	case "exceed_context_size_error", "context_length_exceeded", "context_window_exceeded", "contextWindowExceeded", "prompt_too_long", "request_too_large":
 		return true
 	}
 	return false
@@ -982,7 +937,7 @@ func isAuthErrorCode(code string) bool {
 
 func isUnavailableErrorCode(code string) bool {
 	switch code {
-	case "server_error", "overloaded_error", "service_unavailable", "unavailable_error", "model_not_loaded":
+	case "server_error", "overloaded_error", "service_unavailable", "unavailable_error", "server_busy", "model_not_loaded", "rate_limit_exceeded", "rate_limit_error", "rate_limit":
 		return true
 	}
 	return false

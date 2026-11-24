@@ -68,17 +68,23 @@ func classifyPiModelInvokeFailure(err error, answer native.Outcome) ModelInvokeR
 	if err != nil {
 		return ModelInvokeResult{Outcome: ModelInvokeRuntimeUnavailable, Reason: "Pi background runtime failed to start"}
 	}
+	if answer.FailureCode == "context_too_long" {
+		return ModelInvokeResult{Outcome: ModelInvokeContextTooLong, Reason: "Model invocation prompt exceeds the model context window"}
+	}
 	if apiErr, ok := parseStructuredAPIError(answer.Error); ok {
-		if isContextTooLongErrorCode(apiErr.Code) || isContextTooLongErrorCode(apiErr.Type) {
+		if isContextTooLongErrorCode(apiErr.Code) || isContextTooLongErrorCode(apiErr.Type) ||
+			(apiErr.StatusCode != nil && *apiErr.StatusCode == 413) {
 			return ModelInvokeResult{Outcome: ModelInvokeContextTooLong, Reason: "Model invocation prompt exceeds the model context window"}
 		}
 		if apiErr.Code == "model_not_found" {
 			return ModelInvokeResult{Outcome: ModelInvokeRuntimeIncompatible, Reason: "Pi background model is not available"}
 		}
-		if isAuthErrorCode(apiErr.Code) || isAuthErrorCode(apiErr.Type) {
+		if isAuthErrorCode(apiErr.Code) || isAuthErrorCode(apiErr.Type) ||
+			(apiErr.StatusCode != nil && (*apiErr.StatusCode == 401 || *apiErr.StatusCode == 403)) {
 			return ModelInvokeResult{Outcome: ModelInvokeAuthRequired, Reason: "Pi background authentication is required"}
 		}
-		if isUnavailableErrorCode(apiErr.Code) || isUnavailableErrorCode(apiErr.Type) {
+		if isUnavailableErrorCode(apiErr.Code) || isUnavailableErrorCode(apiErr.Type) ||
+			(apiErr.StatusCode != nil && (*apiErr.StatusCode == 429 || *apiErr.StatusCode >= 500)) {
 			return ModelInvokeResult{Outcome: ModelInvokeRuntimeUnavailable, Reason: "Pi background model service is unavailable"}
 		}
 	}
