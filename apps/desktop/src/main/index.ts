@@ -1,7 +1,19 @@
-import { existsSync, readFileSync, renameSync } from "node:fs";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import {
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+
+import type { LocalReleaseDescriptor } from "@linger/local-installation/release-descriptor";
 
 import {
   Notification,
@@ -340,6 +352,80 @@ async function main(): Promise<void> {
       ? { checkDelayMs: bundleCheckDelayMs }
       : {}),
   });
+  const runExec = promisify(execFile);
+  let managedTeamhub: ChildProcess | undefined;
+  const stopManagedTeamhub = async (): Promise<void> => {
+    const child = managedTeamhub;
+    managedTeamhub = undefined;
+    if (!child || child.exitCode !== null) return;
+    await new Promise<void>((resolveStop) => {
+      const killTimer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // already exited
+        }
+        resolveStop();
+      }, 4_000);
+      child.once("exit", () => {
+        clearTimeout(killTimer);
+        resolveStop();
+      });
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        clearTimeout(killTimer);
+        resolveStop();
+      }
+    });
+  };
+  const startManagedTeamhub = async (
+    release: LocalReleaseDescriptor,
+  ): Promise<void> => {
+    if (process.env.LINGER_TEAMHUB_MANAGED !== "1") return;
+    await stopManagedTeamhub();
+    const exe = (name: string) =>
+      process.platform === "win32" ? `${name}.exe` : name;
+    const teamhubDir = path.join(home, release.modules.teamhub.path);
+    const migrateExe = path.join(teamhubDir, exe("migrate"));
+    const teamhubExe = path.join(teamhubDir, exe("teamhub"));
+    if (existsSync(migrateExe) && process.env.TEAMHUB_DATABASE_URL) {
+      await runExec(migrateExe, [], { cwd: teamhubDir, env: process.env });
+    }
+    if (!existsSync(teamhubExe)) {
+      throw new Error(`Managed teamhub binary missing: ${teamhubExe}`);
+    }
+    const logDir = path.join(userData, "logs");
+    mkdirSync(logDir, { recursive: true });
+    const logStream = createWriteStream(path.join(logDir, "teamhub.log"), {
+      flags: "a",
+    });
+    const child = spawn(teamhubExe, [], {
+      cwd: teamhubDir,
+      env: { ...process.env, GIN_MODE: "release" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stdout?.pipe(logStream);
+    child.stderr?.pipe(logStream);
+    managedTeamhub = child;
+    if (child.pid) {
+      writeFileSync(
+        path.join(userData, "teamhub.pid"),
+        JSON.stringify({
+          pid: child.pid,
+          appVersion: release.appVersion,
+          artifactId: release.modules.teamhub.artifactId,
+        }),
+        "utf8",
+      );
+    }
+    log.info("managed_teamhub.started", {
+      pid: child.pid,
+      appVersion: release.appVersion,
+      artifactId: release.modules.teamhub.artifactId,
+    });
+  };
+
   const healthWatchdog = new HealthWatchdogModule();
   const healthGateTimeoutMs =
     !app.isPackaged && process.env.LINGER_HEALTH_GATE_TIMEOUT_MS
@@ -363,6 +449,47 @@ async function main(): Promise<void> {
     ...(healthGateIntervalMs !== undefined && Number.isFinite(healthGateIntervalMs)
       ? { healthGateIntervalMs }
       : {}),
+    backupDatabase: process.env.TEAMHUB_DATABASE_URL
+      ? async (appVersion) => {
+          const relFile = `instances/desktop/backups/pre-${appVersion}.dump`;
+          const absFile = path.join(home, relFile);
+          mkdirSync(path.dirname(absFile), { recursive: true });
+          const pgDumpBin = process.env.LINGER_PG_DUMP_BIN || "pg_dump";
+          await runExec(pgDumpBin, [
+            "--format=custom",
+            "--file",
+            absFile,
+            process.env.TEAMHUB_DATABASE_URL!,
+          ]);
+          log.info("release_orchestrator.db_backed_up", {
+            appVersion,
+            file: relFile,
+          });
+          return relFile;
+        }
+      : undefined,
+    restoreDatabase: process.env.TEAMHUB_DATABASE_URL
+      ? async (relFile) => {
+          await stopManagedTeamhub();
+          const absFile = path.join(home, relFile);
+          const pgRestoreBin =
+            process.env.LINGER_PG_RESTORE_BIN || "pg_restore";
+          await runExec(pgRestoreBin, [
+            "--clean",
+            "--if-exists",
+            "--no-owner",
+            "--dbname",
+            process.env.TEAMHUB_DATABASE_URL!,
+            absFile,
+          ]).catch((err: unknown) => {
+            // pg_restore returns non-zero on benign pre-existing schema notices; log and continue
+            log.warn("release_orchestrator.pg_restore_notice", {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
+          log.info("release_orchestrator.db_restored", { file: relFile });
+        }
+      : undefined,
     hotReloadSkills: async (release) => {
       log.info("release_orchestrator.skills_reloaded", {
         appVersion: release.appVersion,
@@ -396,6 +523,9 @@ async function main(): Promise<void> {
       }, 60);
     },
     restartServices: async (release, changed) => {
+      if (changed.includes("teamhub")) {
+        await startManagedTeamhub(release);
+      }
       if (changed.includes("computer-daemon")) {
         const daemonDir = path.join(home, release.modules["computer-daemon"].path);
         const daemonExe = path.join(
@@ -448,7 +578,20 @@ async function main(): Promise<void> {
             name: "teamhub-healthz",
             check: async () => {
               const res = await fetch(teamhubHealth).catch(() => undefined);
-              return res?.ok ?? false;
+              if (!res?.ok) return false;
+              if (process.env.TEAMHUB_LOCAL_IDENTITY_KEY) {
+                const idUrl = new URL("/v0/local/identity", teamhubHealth);
+                const idRes = await fetch(idUrl, {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({
+                    nonce: randomBytes(12).toString("hex"),
+                    origin: process.env.WEB_PUBLIC_ORIGIN || origin || "http://127.0.0.1",
+                  }),
+                }).catch(() => undefined);
+                if (!idRes?.ok) return false;
+              }
+              return true;
             },
           });
         }
@@ -464,6 +607,18 @@ async function main(): Promise<void> {
       stop: async () => {},
     },
     bundleStore,
+    {
+      name: "ManagedTeamhub",
+      dependsOn: ["BundleStore"],
+      start: async () => {
+        if (process.env.LINGER_TEAMHUB_MANAGED !== "1") return;
+        const current = await bundleStore.currentRelease();
+        if (current) await startManagedTeamhub(current);
+      },
+      stop: async () => {
+        await stopManagedTeamhub();
+      },
+    },
     healthWatchdog,
     language,
     new EnrollmentModule({
