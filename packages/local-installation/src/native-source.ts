@@ -151,6 +151,7 @@ export function planBundleNativeCommand(
         args: [path.join(webDir, "static-host.mjs")],
         cwd: webDir,
         env: {
+          LINGER_WEB_ROOT: path.join(webDir, "dist"),
           LINGER_ALLOWED_WEB_ROOT: path.join(path.resolve(home), "store", "web"),
           ...(options.webControlToken
             ? { LINGER_WEB_CONTROL_TOKEN: options.webControlToken }

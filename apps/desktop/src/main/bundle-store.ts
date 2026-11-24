@@ -429,7 +429,12 @@ export class BundleStoreModule implements Module {
   }
 
   /**
-   * Rolls back to `previous.json` and records the failed version in `denylist.json`.
+   * Rolls back a failed release and records it in `denylist.json`.
+   * - If `failedVersion` failed BEFORE commit (`current.json !== failedVersion`),
+   *   `current.json` already points to the last healthy release; only `pending.json`
+   *   is discarded so we never double-downgrade to `previous.json`.
+   * - If `failedVersion` failed AFTER commit (`current.json === failedVersion`,
+   *   e.g. post-commit crash watchdog), restores `previous.json` into `current.json`.
    */
   async rollbackToPrevious(
     failedVersion: string,
@@ -443,6 +448,10 @@ export class BundleStoreModule implements Module {
       reason,
     });
     await rm(this.#pointerPath("pending"), { force: true });
+    const current = await this.readCurrent();
+    if (current && current.appVersion !== failedVersion) {
+      return current;
+    }
     const previous = await this.readPrevious();
     if (previous) {
       await writeJsonAtomic(this.#pointerPath("current"), {

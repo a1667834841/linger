@@ -142,6 +142,7 @@ export class ReleaseOrchestratorModule implements Module {
   #ctx: ModuleContext | undefined;
   #state: OrchestratorState = { kind: "idle" };
   #stagedVersion: string | undefined;
+  #stagingPromise: Promise<void> | undefined;
   #rollbackNotice: RollbackNotice | undefined;
   readonly #unsubscribe: (() => void)[] = [];
 
@@ -183,24 +184,36 @@ export class ReleaseOrchestratorModule implements Module {
   }
 
   async onBundleStaged(appVersion: string): Promise<void> {
-    const store = this.#ctx!.get<BundleStoreModule>("BundleStore");
-    const next = await store.readRelease(appVersion);
-    if (!next) return;
-    const current = await store.currentRelease();
-    const diff = diffReleaseModules(current, next);
     this.#stagedVersion = appVersion;
+    const task = (async () => {
+      const store = this.#ctx!.get<BundleStoreModule>("BundleStore");
+      const next = await store.readRelease(appVersion);
+      if (!next) return;
+      const current = await store.currentRelease();
+      const diff = diffReleaseModules(current, next);
+      this.#stagedVersion = appVersion;
 
-    // Zero-downtime skills-only updates apply silently immediately.
-    if (diff.scope === "skills" && this.#hooks.hotReloadSkills) {
-      await this.applyStaged();
-      return;
-    }
-    this.#setState({ kind: "ready", version: appVersion, diff });
+      // Zero-downtime skills-only updates apply silently immediately.
+      if (diff.scope === "skills" && this.#hooks.hotReloadSkills) {
+        await this.#applyVersion(appVersion);
+        return;
+      }
+      this.#setState({ kind: "ready", version: appVersion, diff });
+    })();
+    this.#stagingPromise = task.finally(() => {
+      if (this.#stagingPromise === task) this.#stagingPromise = undefined;
+    });
+    await this.#stagingPromise;
   }
 
   async applyStaged(): Promise<boolean> {
+    if (this.#stagingPromise) await this.#stagingPromise;
     const version = this.#stagedVersion;
     if (!version) return false;
+    return this.#applyVersion(version);
+  }
+
+  async #applyVersion(version: string): Promise<boolean> {
     const ctx = this.#ctx!;
     const store = ctx.get<BundleStoreModule>("BundleStore");
     const watchdog = ctx.get<HealthWatchdogModule>("HealthWatchdog");

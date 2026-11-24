@@ -142,6 +142,23 @@ describe("BundleStoreModule", () => {
     expect(restored?.appVersion).toBe("0.2.14");
     expect((await store.readCurrent())?.appVersion).toBe("0.2.14");
     expect(await store.isDenylisted("0.2.15")).toBe(true);
+
+    // Pre-commit failure of 0.2.16 must keep current at 0.2.14 (never double-downgrade to previous)
+    await store.writeReleaseDescriptor(makeDescriptor("0.2.16", "333333333333"));
+    await store.beginPending({
+      appVersion: "0.2.16",
+      releaseFile: "releases/0.2.16/release.json",
+      updatedAt: new Date().toISOString(),
+    });
+    const preCommitRolled = await store.rollbackToPrevious(
+      "0.2.16",
+      "healthcheck",
+      "probe failed before commit",
+    );
+    expect(preCommitRolled?.appVersion).toBe("0.2.14");
+    expect((await store.readCurrent())?.appVersion).toBe("0.2.14");
+    expect(await store.readPending()).toBeUndefined();
+    expect(await store.isDenylisted("0.2.16")).toBe(true);
   });
 
   it("imports offline seed on cold start and prunes unreferenced old modules in GC while protecting current + previous", async () => {
