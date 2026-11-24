@@ -281,7 +281,13 @@ Gateway and runs Agents. The daemon exits with the app.
   mid-download without toggling the saved `preventSleep` preference. A Quick Install that stopped
   before the computer enrolled is not resumed: setup shows again and Install
   finishes it, reusing a finished job only while its origin answers (a stopped
-  server gets a new job, which starts the services again). The start failure
+  server gets a new job, which starts the services again). It follows a
+  running or finished job only when that job's `setupChoice` is what the
+  person chose now (`local-models` for the local model; any but
+  `local-models` for the installer's pick); otherwise it asks for a new job,
+  and the installer stops the earlier one, such as a local model download
+  that kept running after a quit, so a subscription chosen since never
+  waits on it. The start failure
   page's Set Up Again forgets the record (`local-server.json`), clears the
   active enrollment while keeping per-origin `savedEnrollments` in
   `config.json` (`legacy_data_set_aside` clears `savedEnrollments` as well),

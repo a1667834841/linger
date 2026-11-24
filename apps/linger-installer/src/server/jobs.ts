@@ -26,6 +26,12 @@ const sameStep = (a: Event, b: Event) =>
   a.progress?.unit === b.progress?.unit;
 const active = (job: Job) =>
   ["queued", "running", "waiting_user"].includes(job.state);
+// What the person chose to install: a runtime, the local model
+// ("local-models"), or a runtime behind their own key.
+const choiceOf = (input: Input) =>
+  input.byok
+    ? `byok:${input.byok.runtime ?? input.setupChoice ?? ""}`
+    : input.setupChoice;
 function validOutcome(value: unknown): value is {
   state: string;
   code: number;
@@ -285,20 +291,30 @@ export class JobManager {
       listener(structuredClone(event));
   }
   async start(input: Input): Promise<Job> {
-    const existing = [...this.records.values()].find(
+    const current = [...this.records.values()].filter(
       (record) =>
         record.job.instance === input.instance &&
         record.job.preparation === input.preparation &&
         active(record.job),
     );
+    // One still stopping for a replacement is not the current job.
+    const existing =
+      current.find((record) => !record.cancelRequested) ?? current[0];
     // A job that ran to the end and now waits for the person mutates
     // nothing; a new start is their answer, so it replaces that job and
     // checks the computer again instead of returning the stale outcome.
+    // A start that chooses another runtime (or the local model) is the
+    // person's latest choice too: it stops the running job, which keeps the
+    // download of a local model chosen before, and runs once that has ended
+    // and left the instance. A start without a choice follows the running job.
     // cancel() marks it canceled before its first await and the new record
     // is set in the same step, so a concurrent start gets the new job back.
     const replaced =
-      existing?.job.state === "waiting_user" && !existing.executing
-        ? this.cancel(existing.job.id)
+      existing &&
+      ((existing.job.state === "waiting_user" && !existing.executing) ||
+        (choiceOf(input) !== undefined &&
+          choiceOf(input) !== choiceOf(existing.input)))
+        ? this.cancel(existing.job.id).then(() => existing.task)
         : undefined;
     if (existing && !replaced) return structuredClone(existing.job);
     const id = randomUUID(),
