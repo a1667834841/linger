@@ -485,7 +485,15 @@ Gateway and runs Agents. The daemon exits with the app.
   English. Errors from transfers and servers stay in English.
 - `src/preload/index.ts`: the only SPA API, `window.lingerDesktop`. Its
   `update` reads the Updater's state (without the release page URL) and runs
-  the tray's install and check, for the SPA's account menu.
+  the tray's install and check, for the SPA's account menu. Its
+  `localModelsUpdate` reads `LocalModelsUpdaterModule` (`src/main/local-models-updater.ts`)
+  for independent Ed25519-signed localmodels kit updates on this desktop
+  computer: background checks fetch only small metadata (`dist-tags` and the
+  signed manifest), downloads and read-only smoke checks run only on explicit
+  user confirmation, activation waits until both `active_operations` and
+  `local_models_jobs` reach zero before restarting the daemon via
+  `computer.runtime`, and startup failures automatically roll back to the
+  bundled baseline.
 - `src/shared/api.ts`, `src/shared/shell.ts`: preload contract types and IPC
   channel names.
 - `src/main/computer-daemon.ts`: ComputerDaemon. While the computer is

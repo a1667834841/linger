@@ -203,6 +203,7 @@ export class ComputerDaemonModule implements Module {
   #state: RuntimeState = "stopped";
   #connection = "disconnected";
   #running = 0;
+  #localModelsJobs = 0;
   #failures = 0;
   #startedAt = 0;
   #retry: NodeJS.Timeout | undefined;
@@ -226,6 +227,11 @@ export class ComputerDaemonModule implements Module {
   // Operations the daemon is executing right now.
   running(): number {
     return this.#running;
+  }
+
+  // Local model download or load jobs the daemon is supervising right now.
+  localModelsBusy(): number {
+    return this.#localModelsJobs;
   }
 
   // online, connecting, auth_failed, upgrade_required, or disconnected
@@ -410,6 +416,7 @@ export class ComputerDaemonModule implements Module {
         permission?: unknown;
         gateway_state?: unknown;
         active_operations?: unknown;
+        local_models_jobs?: unknown;
       };
       try {
         status = JSON.parse(line) as typeof status;
@@ -433,11 +440,17 @@ export class ComputerDaemonModule implements Module {
         this.#setConnection(connectionState(status.gateway_state));
       if (typeof status.active_operations === "number")
         this.#setRunning(status.active_operations);
+      this.#setLocalModelsJobs(
+        typeof status.local_models_jobs === "number"
+          ? status.local_models_jobs
+          : 0,
+      );
     });
     child.onExit((code, reason) => {
       if (this.#child !== child) return;
       this.#child = undefined;
       this.#setRunning(0);
+      this.#setLocalModelsJobs(0);
       this.#setConnection("disconnected");
       if (this.#stopping) return;
       if (Date.now() - this.#startedAt >= HEALTHY_AFTER_MS) this.#failures = 0;
@@ -516,6 +529,7 @@ export class ComputerDaemonModule implements Module {
     if (!child) return;
     this.#child = undefined;
     this.#setRunning(0);
+    this.#setLocalModelsJobs(0);
     this.#setConnection("disconnected");
     await new Promise<void>((resolve) => {
       const timer = setTimeout(() => {
@@ -571,6 +585,12 @@ export class ComputerDaemonModule implements Module {
     if (this.#running === running) return;
     this.#running = running;
     this.#ctx?.bus.emit("runtime.activity", running);
+  }
+
+  #setLocalModelsJobs(jobs: number): void {
+    if (this.#localModelsJobs === jobs) return;
+    this.#localModelsJobs = jobs;
+    this.#ctx?.bus.emit("local-models.activity", jobs);
   }
 
   #setConnection(connection: string): void {

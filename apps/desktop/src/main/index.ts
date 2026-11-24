@@ -36,6 +36,7 @@ import {
   type SourceArchive,
   type SourceDependencies,
 } from "./local-server.js";
+import { LocalModelsUpdaterModule } from "./local-models-updater.js";
 import { defaultBridgeStateDirectory } from "./legacy-bridge.js";
 import {
   migrateLegacyComputer,
@@ -343,6 +344,12 @@ async function main(): Promise<void> {
     }),
     setup,
     updater,
+    new LocalModelsUpdaterModule({
+      home,
+      desktopVersion: VERSION,
+      installerDirectory: path.join(here, "../installer"),
+      openExternal: (url) => shell.openExternal(url),
+    }),
     new TrayModule({ quit: () => void quit() }),
     new DesktopIpcModule({
       defaultDisplayName,

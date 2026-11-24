@@ -2,6 +2,8 @@
   "platform": "darwin",
   "arch": "arm64",
   "localmodelsTool": {
+    "version": "0.1.0.dev54",
+    "npmVersion": "0.1.0-dev.54",
     "url": "https://d2ikbbcl3j6jz9.cloudfront.net/cli/localmodels/0.1.0.dev54/darwin-arm64.tgz",
     "mirrors": [
       "https://registry.npmjs.org/@simplexai/localmodels-darwin-arm64/-/localmodels-darwin-arm64-0.1.0-dev.54.tgz",

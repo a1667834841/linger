@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { IPC } from "../shared/api.js";
+import { IPC, type DesktopLocalModelsUpdateState } from "../shared/api.js";
 import type { UpdateState } from "./updater.js";
 
 const handlers = vi.hoisted(
@@ -48,6 +48,32 @@ const fixture = async (
     ...stubModule("Diagnostics"),
     save: vi.fn(async () => "/Users/me/Downloads/linger-diagnostics.zip"),
   };
+  let localModelsUpdateState: DesktopLocalModelsUpdateState | null = {
+    kind: "idle",
+    currentVersion: "0.1.0.dev54",
+    source: "bundled",
+    sourceCommit: "a".repeat(40),
+    autoCheck: true,
+  };
+  const localModelsUpdater = {
+    ...stubModule("LocalModelsUpdater"),
+    state: () => localModelsUpdateState,
+    check: vi.fn(async () => {}),
+    install: vi.fn(async () => {}),
+    setAutoCheck: vi.fn((enabled: boolean) => {
+      if (localModelsUpdateState) {
+        localModelsUpdateState = {
+          ...localModelsUpdateState,
+          autoCheck: enabled,
+        };
+      }
+      bus.emit(
+        "local-models.update.changed",
+        localModelsUpdateState?.kind ?? "none",
+      );
+    }),
+    openNotes: vi.fn(async () => {}),
+  };
   const send = vi.fn();
   const windows = {
     ...stubModule("WindowManager"),
@@ -67,6 +93,7 @@ const fixture = async (
       windows as never,
       stubModule("WorkspaceGrants"),
       updater as never,
+      localModelsUpdater as never,
       local as never,
       new DesktopIpcModule({ defaultDisplayName: "Desk" }),
     ],
@@ -87,6 +114,7 @@ const fixture = async (
     language,
     local,
     updater,
+    localModelsUpdater,
     send,
     setUpdate,
     invoke,
@@ -113,7 +141,33 @@ describe("DesktopIpcModule local account", () => {
     expect(() =>
       f.invoke(IPC.localAccountAvailable, "https://evil.example.com"),
     ).toThrow("Not allowed");
+    expect(() =>
+      f.invoke(IPC.localModelsUpdateInstall, "https://evil.example.com"),
+    ).toThrow("Not allowed");
     expect(f.local.signInWithAccount).not.toHaveBeenCalled();
+    expect(f.localModelsUpdater.install).not.toHaveBeenCalled();
+    await f.host.stop("quit");
+  });
+
+  it("forwards localmodels update IPC calls and pushes state events", async () => {
+    const f = await fixture();
+    expect(await f.invoke(IPC.localModelsUpdateState)).toMatchObject({
+      kind: "idle",
+      currentVersion: "0.1.0.dev54",
+      autoCheck: true,
+    });
+    await f.invoke(IPC.localModelsUpdateCheck);
+    await f.invoke(IPC.localModelsUpdateInstall);
+    await f.invoke(IPC.localModelsUpdateOpenNotes);
+    await f.invoke(IPC.localModelsUpdateSetAutoCheck, SERVER, false);
+    expect(f.localModelsUpdater.check).toHaveBeenCalledWith(true);
+    expect(f.localModelsUpdater.install).toHaveBeenCalledOnce();
+    expect(f.localModelsUpdater.openNotes).toHaveBeenCalledOnce();
+    expect(f.localModelsUpdater.setAutoCheck).toHaveBeenCalledWith(false);
+    expect(f.send).toHaveBeenCalledWith(
+      IPC.localModelsUpdateStateEvent,
+      expect.objectContaining({ autoCheck: false }),
+    );
     await f.host.stop("quit");
   });
 

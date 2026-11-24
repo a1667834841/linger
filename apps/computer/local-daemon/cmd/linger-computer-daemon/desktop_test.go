@@ -15,9 +15,10 @@ import (
 )
 
 type fakeStatusSource struct {
-	mu     sync.Mutex
-	state  string
-	active int
+	mu              sync.Mutex
+	state           string
+	active          int
+	localModelsJobs int
 }
 
 func (f *fakeStatusSource) GatewayState() string {
@@ -32,10 +33,22 @@ func (f *fakeStatusSource) ActiveOperationCount() int {
 	return f.active
 }
 
+func (f *fakeStatusSource) ActiveLocalModelsJobCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.localModelsJobs
+}
+
 func (f *fakeStatusSource) set(state string, active int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.state, f.active = state, active
+}
+
+func (f *fakeStatusSource) setLocalModelsJobs(jobs int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.localModelsJobs = jobs
 }
 
 func TestDesktopChannelShutsDownOnStdinEOF(t *testing.T) {
@@ -94,6 +107,14 @@ func TestReportDesktopStatusWritesChangesOnly(t *testing.T) {
 	source.set("connected", 2)
 	if got := next(); got.ActiveOperations != 2 {
 		t.Fatalf("third = %+v", got)
+	}
+	source.setLocalModelsJobs(1)
+	if got := next(); got.LocalModelsJobs != 1 {
+		t.Fatalf("fourth = %+v", got)
+	}
+	source.setLocalModelsJobs(0)
+	if got := next(); got.LocalModelsJobs != 0 {
+		t.Fatalf("fifth = %+v", got)
 	}
 	cancel()
 	if lines.Scan() {

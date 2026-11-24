@@ -16,6 +16,7 @@ import { ConnectorOAuth } from "./connector-oauth.js";
 import type { DiagnosticsModule } from "./diagnostics.js";
 import type { EnrollmentModule } from "./enrollment.js";
 import type { LanguageModule } from "./language.js";
+import type { LocalModelsUpdaterModule } from "./local-models-updater.js";
 import type { LocalServerModule } from "./local-server.js";
 import type { Module, ModuleContext } from "./modules.js";
 import { sameOrigin } from "./navigation.js";
@@ -30,6 +31,7 @@ import type { WorkspaceGrantsModule } from "./workspace-grants.js";
 
 const grantIdInput = z.string().min(1).max(128);
 const languageInput = z.enum(LANGUAGES);
+const autoCheckInput = z.boolean();
 // The server address is not settable from the SPA: a page served by one
 // server must not be able to repoint the app. It changes on app://offline.
 const settingsPatchInput = z
@@ -79,6 +81,7 @@ export class DesktopIpcModule implements Module {
     "WindowManager",
     "WorkspaceGrants",
     "Updater",
+    "LocalModelsUpdater",
     "Language",
   ];
   readonly #defaultDisplayName: string;
@@ -102,6 +105,8 @@ export class DesktopIpcModule implements Module {
     const power = ctx.get<PowerGuardModule>("PowerGuard");
     const localServer = ctx.get<LocalServerModule>("LocalServer");
     const updater = ctx.get<UpdaterModule>("Updater");
+    const localModelsUpdater =
+      ctx.get<LocalModelsUpdaterModule>("LocalModelsUpdater");
     const language = ctx.get<LanguageModule>("Language");
     const diagnostics = ctx.get<DiagnosticsModule>("Diagnostics");
 
@@ -227,6 +232,15 @@ export class DesktopIpcModule implements Module {
     handle(IPC.updateState, () => updateView(updater.state()));
     handle(IPC.updateInstall, () => updater.install());
     handle(IPC.updateCheck, () => updater.check());
+    handle(IPC.localModelsUpdateState, () => localModelsUpdater.state());
+    handle(IPC.localModelsUpdateCheck, () => localModelsUpdater.check(true));
+    handle(IPC.localModelsUpdateInstall, () => localModelsUpdater.install());
+    handle(IPC.localModelsUpdateSetAutoCheck, (enabled) => {
+      localModelsUpdater.setAutoCheck(autoCheckInput.parse(enabled));
+    });
+    handle(IPC.localModelsUpdateOpenNotes, () =>
+      localModelsUpdater.openNotes(),
+    );
 
     const permissions = this.#permissions;
     if (permissions)
@@ -247,6 +261,11 @@ export class DesktopIpcModule implements Module {
         windows
           .webContents()
           ?.send(IPC.updateStateEvent, updateView(updater.state())),
+      ),
+      ctx.bus.on("local-models.update.changed", () =>
+        windows
+          .webContents()
+          ?.send(IPC.localModelsUpdateStateEvent, localModelsUpdater.state()),
       ),
     );
   }

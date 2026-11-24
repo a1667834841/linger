@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import {
   IPC,
   type ComputerStatus,
+  type DesktopLocalModelsUpdateState,
   type DesktopUpdateState,
   type LingerDesktopApi,
   type PreviewViewState,
@@ -52,6 +53,24 @@ const api: LingerDesktopApi = {
     },
     install: () => ipcRenderer.invoke(IPC.updateInstall),
     check: () => ipcRenderer.invoke(IPC.updateCheck),
+  },
+  localModelsUpdate: {
+    getState: () => ipcRenderer.invoke(IPC.localModelsUpdateState),
+    onState: (callback) => {
+      const listener = (
+        _event: unknown,
+        state: DesktopLocalModelsUpdateState | null,
+      ): void => callback(state);
+      ipcRenderer.on(IPC.localModelsUpdateStateEvent, listener);
+      return () => {
+        ipcRenderer.off(IPC.localModelsUpdateStateEvent, listener);
+      };
+    },
+    check: () => ipcRenderer.invoke(IPC.localModelsUpdateCheck),
+    install: () => ipcRenderer.invoke(IPC.localModelsUpdateInstall),
+    setAutoCheck: (enabled) =>
+      ipcRenderer.invoke(IPC.localModelsUpdateSetAutoCheck, enabled),
+    openNotes: () => ipcRenderer.invoke(IPC.localModelsUpdateOpenNotes),
   },
   connectorOAuth: {
     prepare: () => ipcRenderer.invoke(IPC.connectorOAuthPrepare),

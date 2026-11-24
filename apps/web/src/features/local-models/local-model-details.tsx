@@ -32,6 +32,7 @@ import {
   unavailableCopy,
 } from "./local-models-copy";
 import { localModelsMessages as m } from "./local-models.messages";
+import type { LocalModelsUpdate } from "./local-models-update";
 import type { LocalModelPool, LocalModelsView } from "./local-models-queries";
 import {
   contextLabel,
@@ -536,14 +537,22 @@ function PoolBar({
 
 /** Memory and hardware of one Computer, for people who want the numbers. */
 export function AdvancedDialog({
+  engineUpdate,
   onClose,
   view,
 }: {
+  engineUpdate?: LocalModelsUpdate;
   onClose: () => void;
   view: LocalModelsView;
 }) {
   const t = useT();
   const host = view.computer.host;
+  const engineState = engineUpdate?.state;
+  const engineBusy =
+    engineState?.kind === "downloading" ||
+    engineState?.kind === "verifying" ||
+    engineState?.kind === "waiting" ||
+    engineState?.kind === "applying";
   type PoolHolder = LocalModelPool["holders"][number];
   const seenHolderIds = new Set<string>();
   const models: PoolHolder[] = [];
@@ -653,6 +662,75 @@ export function AdvancedDialog({
               </Fact>
             </div>
           </section>
+        ) : null}
+        {engineUpdate && engineState ? (
+          <>
+            <h3
+              className={cn(
+                "mb-1 text-sm font-medium text-muted-foreground",
+                (view.pools.length > 0 || Boolean(host)) && "mt-5",
+              )}
+            >
+              {t(m.engineSectionTitle)}
+            </h3>
+            <div>
+              <Fact bordered={false} label={t(m.engineFactVersion)}>
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-secondary-foreground">
+                    {engineState.currentVersion}
+                  </code>
+                  <span className="text-xs text-muted-foreground">
+                    ·{" "}
+                    {t(
+                      engineState.source === "updated"
+                        ? m.engineSourceUpdated
+                        : m.engineSourceBundled,
+                    )}{" "}
+                    · {engineState.sourceCommit.slice(0, 7)}
+                  </span>
+                </span>
+              </Fact>
+              <Fact label={t(m.engineFactUpdates)}>
+                <div className="flex flex-wrap items-center gap-3">
+                  {engineState.kind === "available" ? (
+                    <Button
+                      onClick={() => engineUpdate.install()}
+                      size="compact"
+                      tone="primary"
+                    >
+                      {t(m.engineUpdateToVersion, {
+                        version: engineState.version,
+                      })}
+                    </Button>
+                  ) : (
+                    <Button
+                      disabled={engineBusy}
+                      loading={engineState.kind === "checking"}
+                      onClick={() => engineUpdate.check()}
+                      size="compact"
+                    >
+                      {t(
+                        engineState.kind === "checking"
+                          ? m.engineCheckingUpdates
+                          : m.engineCheckUpdates,
+                      )}
+                    </Button>
+                  )}
+                  <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                    <input
+                      checked={engineState.autoCheck}
+                      className="size-3.5 accent-foreground"
+                      onChange={(event) =>
+                        engineUpdate.setAutoCheck(event.target.checked)
+                      }
+                      type="checkbox"
+                    />
+                    <span>{t(m.engineAutoCheck)}</span>
+                  </label>
+                </div>
+              </Fact>
+            </div>
+          </>
         ) : null}
       </div>
     </ModalDialog>
