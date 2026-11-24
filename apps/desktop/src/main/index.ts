@@ -426,6 +426,83 @@ async function main(): Promise<void> {
     });
   };
 
+  let managedVoiceRuntime: ChildProcess | undefined;
+  let activeVoiceSessions = 0;
+  let voicePollTimer: ReturnType<typeof setInterval> | undefined;
+  const stopManagedVoiceRuntime = async (): Promise<void> => {
+    const child = managedVoiceRuntime;
+    managedVoiceRuntime = undefined;
+    if (!child || child.exitCode !== null) return;
+    await new Promise<void>((resolveStop) => {
+      const killTimer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // already exited
+        }
+        resolveStop();
+      }, 4_000);
+      child.once("exit", () => {
+        clearTimeout(killTimer);
+        resolveStop();
+      });
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        clearTimeout(killTimer);
+        resolveStop();
+      }
+    });
+  };
+  const startManagedVoiceRuntime = async (
+    release: LocalReleaseDescriptor,
+  ): Promise<void> => {
+    if (process.env.LINGER_VOICE_RUNTIME_MANAGED !== "1") return;
+    await stopManagedVoiceRuntime();
+    const nsDir = path.join(home, release.modules["node-services"].path);
+    const entry = path.join(nsDir, "voice-runtime.mjs");
+    if (!existsSync(entry)) {
+      throw new Error(`Managed voice-runtime entry missing: ${entry}`);
+    }
+    const logDir = path.join(userData, "logs");
+    mkdirSync(logDir, { recursive: true });
+    const logStream = createWriteStream(path.join(logDir, "voice-runtime.log"), {
+      flags: "a",
+    });
+    const nodeBin = process.env.LINGER_NODE_BIN || process.execPath;
+    const child = spawn(nodeBin, [entry], {
+      cwd: nsDir,
+      env: {
+        ...process.env,
+        ...(nodeBin === process.execPath ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+        LINGER_APP_VERSION: release.appVersion,
+        LINGER_NODE_SERVICES_ARTIFACT_ID:
+          release.modules["node-services"].artifactId,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stdout?.pipe(logStream);
+    child.stderr?.pipe(logStream);
+    managedVoiceRuntime = child;
+    if (child.pid) {
+      writeFileSync(
+        path.join(userData, "voice-runtime.pid"),
+        JSON.stringify({
+          pid: child.pid,
+          appVersion: release.appVersion,
+          artifactId: release.modules["node-services"].artifactId,
+          port: Number(process.env.LINGER_VOICE_RUNTIME_PORT || 0),
+        }),
+        "utf8",
+      );
+    }
+    log.info("managed_voice_runtime.started", {
+      pid: child.pid,
+      appVersion: release.appVersion,
+      artifactId: release.modules["node-services"].artifactId,
+    });
+  };
+
   const healthWatchdog = new HealthWatchdogModule();
   const healthGateTimeoutMs =
     !app.isPackaged && process.env.LINGER_HEALTH_GATE_TIMEOUT_MS
@@ -438,6 +515,7 @@ async function main(): Promise<void> {
   const releaseOrchestrator = new ReleaseOrchestratorModule({
     activeOperations: () =>
       computerDaemon.running() +
+      activeVoiceSessions +
       (!app.isPackaged &&
       process.env.LINGER_TEST_BUSY_FILE &&
       existsSync(process.env.LINGER_TEST_BUSY_FILE)
@@ -526,6 +604,9 @@ async function main(): Promise<void> {
       if (changed.includes("teamhub")) {
         await startManagedTeamhub(release);
       }
+      if (changed.includes("node-services")) {
+        await startManagedVoiceRuntime(release);
+      }
       if (changed.includes("computer-daemon")) {
         const daemonDir = path.join(home, release.modules["computer-daemon"].path);
         const daemonExe = path.join(
@@ -595,6 +676,23 @@ async function main(): Promise<void> {
           });
         }
       }
+      if (changed.includes("node-services")) {
+        const vrHealth =
+          !app.isPackaged && process.env.LINGER_VOICE_RUNTIME_HEALTH_URL;
+        if (vrHealth) {
+          probes.push({
+            name: "voice-runtime-healthz",
+            check: async () => {
+              const res = await fetch(vrHealth).catch(() => undefined);
+              if (!res?.ok) return false;
+              const body = (await res.json().catch(() => undefined)) as
+                | { ok?: boolean; livekitReachable?: boolean }
+                | undefined;
+              return Boolean(body?.ok && body?.livekitReachable);
+            },
+          });
+        }
+      }
       return probes;
     },
   });
@@ -616,6 +714,45 @@ async function main(): Promise<void> {
       },
       stop: async () => {
         await stopManagedTeamhub();
+      },
+    },
+    {
+      name: "ManagedVoiceRuntime",
+      dependsOn: ["BundleStore"],
+      start: async (ctx) => {
+        if (process.env.LINGER_VOICE_RUNTIME_MANAGED !== "1") return;
+        const current = await bundleStore.currentRelease();
+        if (current) await startManagedVoiceRuntime(current);
+        const port = Number(process.env.LINGER_VOICE_RUNTIME_PORT || 0);
+        if (port > 0) {
+          let prev = 0;
+          voicePollTimer = setInterval(() => {
+            void fetch(`http://127.0.0.1:${port}/v1/voice/active`)
+              .then((r) => (r.ok ? r.json() : undefined))
+              .then((data: unknown) => {
+                const next = Number(
+                  (data as { activeSessions?: number } | undefined)
+                    ?.activeSessions ?? 0,
+                );
+                if (!Number.isFinite(next)) return;
+                activeVoiceSessions = next;
+                if (prev > 0 && next === 0) {
+                  ctx.bus.emit("runtime.activity", computerDaemon.running());
+                }
+                prev = next;
+              })
+              .catch(() => undefined);
+          }, 250);
+          voicePollTimer.unref();
+        }
+      },
+      stop: async () => {
+        if (voicePollTimer) {
+          clearInterval(voicePollTimer);
+          voicePollTimer = undefined;
+        }
+        activeVoiceSessions = 0;
+        await stopManagedVoiceRuntime();
       },
     },
     healthWatchdog,
