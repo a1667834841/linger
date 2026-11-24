@@ -6,7 +6,7 @@ import type { ExpoConfig } from "expo/config";
 // The official Expo project, jeffreybins-team/linger; a fork overrides it.
 const officialProjectId = "b761e929-700a-4f74-b987-a184f77866d9";
 const MICROPHONE_USAGE =
-  "Linger uses the microphone for dictation, voice conversations and meeting recordings.";
+  "Linger uses the microphone for live conversations and meeting recordings.";
 const projectId = process.env.EAS_PROJECT_ID || officialProjectId;
 // The official Push Service runs beside the official Relay; a fork that runs
 // its own sets LINGER_PUSH_SERVICE_URL.
