@@ -585,8 +585,7 @@ async function main(): Promise<void> {
                   method: "POST",
                   headers: { "content-type": "application/json" },
                   body: JSON.stringify({
-                    nonce: randomBytes(12).toString("hex"),
-                    origin: process.env.WEB_PUBLIC_ORIGIN || origin || "http://127.0.0.1",
+                    nonce: randomBytes(32).toString("base64url"),
                   }),
                 }).catch(() => undefined);
                 if (!idRes?.ok) return false;
