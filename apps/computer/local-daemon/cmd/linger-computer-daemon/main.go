@@ -30,6 +30,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/registration"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/transport"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/localmodels"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/mirrors"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/permission"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
 	localprocess "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/process"
@@ -257,6 +258,7 @@ func run(args []string) (resultErr error) {
 	resolver := lingercontext.ExecutionResolver{
 		ServiceCommand: serviceCommand,
 		TeamHubCLIBin:  teamhubBin,
+		RegionFile:     mirrors.ResolveRegionFile(environment, localModelsStateDir),
 		ProviderLookup: providerCatalog.Lookup, WorkspaceGrants: workspaceGrants, Views: views,
 		CLICredentials: cliCredentials,
 		RegistrationLookup: func(ctx context.Context, registrationID string) (lingercontext.RegistrationBinding, bool, error) {
