@@ -840,7 +840,7 @@ describe("quick Local Agent creation", () => {
     fireEvent.click(await screen.findByRole("option", { name: "Pi" }));
     expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
     expect(
-      screen.getByText(
+      await screen.findByText(
         "In Pi, enter /login to sign in, or configure an API key in Pi auth.json.",
       ),
     ).toBeVisible();
@@ -898,6 +898,42 @@ describe("quick Local Agent creation", () => {
     expect(link.closest("p")).toHaveTextContent(
       "Download and load a local model in Settings › Models to run Agents with Pi on this computer.",
     );
+  });
+
+  it("shows update command and diagnostic when an incompatible runtime is chosen", async () => {
+    const runtime = await testRuntime();
+    const inventory =
+      await runtime.client.listTenantLocalComputers("tenant-northstar");
+    const computer = inventory.items[0]!;
+    vi.spyOn(runtime.client, "listTenantLocalComputers").mockResolvedValue({
+      items: [
+        {
+          ...computer,
+          platform: "darwin",
+          runtimes: [
+            {
+              error_code: "RUNTIME_INCOMPATIBLE",
+              message: "codex version 0.150.1 is below minimum 0.166.0",
+              models: [],
+              status: "incompatible",
+              type: "codex",
+              version: "codex-cli 0.150.1",
+            },
+          ],
+        },
+      ],
+    });
+    renderCreation(runtime, "local");
+    fireEvent.click(
+      await screen.findByRole("combobox", { name: "Local Computer" }),
+    );
+    fireEvent.click(await screen.findByRole("option", { name: "Jenny's Mac" }));
+
+    expect(await screen.findByText("Codex update required")).toBeVisible();
+    expect(
+      screen.getByText("codex version 0.150.1 is below minimum 0.166.0"),
+    ).toBeVisible();
+    expect(screen.getByText("npm install -g @openai/codex")).toBeVisible();
   });
 
   describe("in the desktop app", () => {
