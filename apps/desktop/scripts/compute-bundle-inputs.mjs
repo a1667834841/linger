@@ -177,7 +177,7 @@ export function computeNativeDepsHash(
   const packagesBlock =
     packagesBlockStart >= 0 ? lockfileText.slice(packagesBlockStart) : lockfileText;
   const entryRegex =
-    /\n  '?([^'\n:]+?)@([^'\n:]+?)'?:\n(?:    [^\n]+\n)*?    resolution: \{integrity: (sha\d+-[A-Za-z0-9+/=]+)\}/g;
+    /\n {2}'?([^'\n:]+?)@([^'\n:]+?)'?:\n(?: {4}[^\n]+\n)*? {4}resolution: \{integrity: (sha\d+-[A-Za-z0-9+/=]+)\}/g;
 
   const matched = [];
   for (const match of packagesBlock.matchAll(entryRegex)) {
