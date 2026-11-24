@@ -44,7 +44,7 @@ func TestCheckPublicRefusesPrivateAddresses(t *testing.T) {
 		"ws://[::1]:7787":          ErrPrivate,
 		"ws://47.111.147.142:7787": nil,
 	} {
-		if err := CheckPublic(context.Background(), raw); !errors.Is(err, want) && err != want {
+		if err := CheckPublic(context.Background(), raw); !errors.Is(err, want) {
 			t.Errorf("CheckPublic(%q) = %v, want %v", raw, err, want)
 		}
 	}
