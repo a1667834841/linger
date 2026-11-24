@@ -388,7 +388,12 @@ async function main(): Promise<void> {
       if (!res.ok) {
         throw new Error(`Web static hot-reload failed: HTTP ${res.status}`);
       }
-      windows.webContents()?.reloadIgnoringCache();
+      // Defer page reload slightly so an in-flight renderer IPC invoke (update.install)
+      // resolves cleanly before the WebContentsView reloads its JS context.
+      setTimeout(() => {
+        const wc = windows.webContents();
+        if (wc && !wc.isDestroyed()) wc.reloadIgnoringCache();
+      }, 60);
     },
     restartServices: async (release, changed) => {
       if (changed.includes("computer-daemon")) {
