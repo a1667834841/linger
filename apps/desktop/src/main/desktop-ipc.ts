@@ -87,15 +87,18 @@ export class DesktopIpcModule implements Module {
     "Language",
   ];
   readonly #defaultDisplayName: string;
+  readonly #shellVersion: string | undefined;
   // Set on macOS only.
   readonly #permissions: DesktopPermissionHost | undefined;
   readonly #unsubscribe: (() => void)[] = [];
 
   constructor(options: {
     defaultDisplayName: string;
+    shellVersion?: string;
     permissions?: DesktopPermissionHost;
   }) {
     this.#defaultDisplayName = options.defaultDisplayName;
+    this.#shellVersion = options.shellVersion;
     this.#permissions = options.permissions;
   }
 
@@ -284,6 +287,14 @@ export class DesktopIpcModule implements Module {
         };
       }
       if (bState?.kind === "checking") return { kind: "checking" };
+      if (bState?.kind === "shell-required") {
+        return {
+          kind: "available",
+          version: bState.minShellVersion,
+          scope: "shell",
+          action: "download-shell",
+        };
+      }
       if (bState?.kind === "failed") {
         return { kind: "failed", error: bState.error };
       }
@@ -294,9 +305,10 @@ export class DesktopIpcModule implements Module {
       const cfg = ctx.config.get();
       const current = await bundleStore?.readCurrent();
       const notice = orchestrator?.rollbackNotice();
+      const shellVersion = this.#shellVersion ?? app.getVersion();
       return {
-        shellVersion: app.getVersion(),
-        appVersion: current?.appVersion ?? app.getVersion(),
+        shellVersion,
+        appVersion: current?.appVersion ?? shellVersion,
         channel: cfg.updateChannel ?? "stable",
         ...(notice ? { rollbackNotice: notice } : {}),
       };

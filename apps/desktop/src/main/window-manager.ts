@@ -250,15 +250,21 @@ export class WindowManagerModule implements Module {
       this.#pendingShow = false;
       this.#clearRevealTimer();
       if (this.#window.isMinimized()) this.#window.restore();
-      this.#window.show();
-      this.#window.focus();
+      if (process.env.LINGER_NO_FOCUS === "1") {
+        this.#window.showInactive();
+      } else {
+        this.#window.show();
+        this.#window.focus();
+      }
       return;
     }
     this.#pendingShow = true;
     this.#ensureWindow();
     this.#scheduleRevealFallback();
     this.#loadConfiguredServer("boot");
-    this.#content?.webContents.focus();
+    if (process.env.LINGER_NO_FOCUS !== "1") {
+      this.#content?.webContents.focus();
+    }
   }
 
   // Warms the default session HTTP cache with `/` HTML and `/assets/*` bundles
@@ -420,8 +426,12 @@ export class WindowManagerModule implements Module {
       return;
     this.#pendingShow = false;
     if (this.#window.isMinimized()) this.#window.restore();
-    this.#window.show();
-    this.#window.focus();
+    if (process.env.LINGER_NO_FOCUS === "1") {
+      this.#window.showInactive();
+    } else {
+      this.#window.show();
+      this.#window.focus();
+    }
   }
 
   // Points the app at another server; false when the address is invalid.

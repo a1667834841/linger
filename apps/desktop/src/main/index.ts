@@ -1,4 +1,4 @@
-import { existsSync, renameSync } from "node:fs";
+import { existsSync, readFileSync, renameSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -106,6 +106,9 @@ if (!app.requestSingleInstanceLock() || quitRequested(process.argv)) {
 }
 
 async function main(): Promise<void> {
+  if (process.platform === "darwin" && process.env.LINGER_NO_FOCUS === "1") {
+    app.dock?.hide();
+  }
   const readyAt = Math.round(process.uptime() * 1000);
   const userData = app.getPath("userData");
   const log = fileLogger(path.join(userData, "logs"), {
@@ -305,19 +308,88 @@ async function main(): Promise<void> {
       : {}),
     ...desktopPermissions,
   });
+  const shellVersion =
+    (!app.isPackaged && process.env.LINGER_SHELL_VERSION) || VERSION;
+  const bundleTarget =
+    (!app.isPackaged && process.env.LINGER_BUNDLE_TARGET) ||
+    `${process.platform}-${process.arch}`;
+  const seedDirectory =
+    !app.isPackaged && process.env.LINGER_SEED_DIR
+      ? path.resolve(process.env.LINGER_SEED_DIR)
+      : path.join(here, "../seed");
+  const bundlePublicKey =
+    !app.isPackaged && process.env.LINGER_UPDATE_PUBLIC_KEY_FILE
+      ? readFileSync(process.env.LINGER_UPDATE_PUBLIC_KEY_FILE, "utf8")
+      : undefined;
+  const bundleCheckDelayMs =
+    !app.isPackaged && process.env.LINGER_BUNDLE_CHECK_DELAY_MS
+      ? Number(process.env.LINGER_BUNDLE_CHECK_DELAY_MS)
+      : undefined;
+
   const bundleStore = new BundleStoreModule({
     home,
-    seedDirectory: path.join(here, "../seed"),
-    target: `${process.platform}-${process.arch}`,
+    seedDirectory,
+    target: bundleTarget,
   });
   const bundleUpdater = new BundleUpdaterModule({
-    shellVersion: VERSION,
-    target: `${process.platform}-${process.arch}`,
+    shellVersion,
+    target: bundleTarget,
     enabled: app.isPackaged || process.env.LINGER_ENABLE_BUNDLE_UPDATER === "1",
+    ...(bundlePublicKey ? { publicKey: bundlePublicKey } : {}),
+    ...(bundleCheckDelayMs !== undefined && Number.isFinite(bundleCheckDelayMs)
+      ? { checkDelayMs: bundleCheckDelayMs }
+      : {}),
   });
   const healthWatchdog = new HealthWatchdogModule();
+  const healthGateTimeoutMs =
+    !app.isPackaged && process.env.LINGER_HEALTH_GATE_TIMEOUT_MS
+      ? Number(process.env.LINGER_HEALTH_GATE_TIMEOUT_MS)
+      : undefined;
+  const healthGateIntervalMs =
+    !app.isPackaged && process.env.LINGER_HEALTH_GATE_INTERVAL_MS
+      ? Number(process.env.LINGER_HEALTH_GATE_INTERVAL_MS)
+      : undefined;
   const releaseOrchestrator = new ReleaseOrchestratorModule({
-    activeOperations: () => computerDaemon.running(),
+    activeOperations: () =>
+      computerDaemon.running() +
+      (!app.isPackaged &&
+      process.env.LINGER_TEST_BUSY_FILE &&
+      existsSync(process.env.LINGER_TEST_BUSY_FILE)
+        ? 1
+        : 0),
+    ...(healthGateTimeoutMs !== undefined && Number.isFinite(healthGateTimeoutMs)
+      ? { healthGateTimeoutMs }
+      : {}),
+    ...(healthGateIntervalMs !== undefined && Number.isFinite(healthGateIntervalMs)
+      ? { healthGateIntervalMs }
+      : {}),
+    hotReloadSkills: async (release) => {
+      log.info("release_orchestrator.skills_reloaded", {
+        appVersion: release.appVersion,
+        artifactId: release.modules["skills-prompts"].artifactId,
+      });
+    },
+    hotReloadWeb: async (release) => {
+      const origin = config.get().serverUrl;
+      const token = process.env.LINGER_WEB_CONTROL_TOKEN;
+      if (!origin || !token) return;
+      const nextRoot = path.join(home, release.modules.web.path, "dist");
+      const res = await fetch(new URL("/__internal/reload-static", origin), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-linger-control-token": token,
+        },
+        body: JSON.stringify({
+          root: nextRoot,
+          artifactId: release.modules.web.artifactId,
+        }),
+      });
+      if (!res.ok) {
+        throw new Error(`Web static hot-reload failed: HTTP ${res.status}`);
+      }
+      windows.webContents()?.reloadIgnoringCache();
+    },
     restartServices: async (release, changed) => {
       if (changed.includes("computer-daemon")) {
         const daemonDir = path.join(home, release.modules["computer-daemon"].path);
@@ -350,9 +422,8 @@ async function main(): Promise<void> {
     },
     buildHealthProbes: (_release, changed) => {
       const origin = config.get().serverUrl;
-      if (!origin) return [];
       const probes = [];
-      if (changed.includes("web") || changed.includes("teamhub")) {
+      if (changed.includes("web") && origin) {
         probes.push({
           name: "web-healthz",
           check: async () => {
@@ -362,6 +433,20 @@ async function main(): Promise<void> {
             return res?.ok ?? false;
           },
         });
+      }
+      if (changed.includes("teamhub")) {
+        const teamhubHealth =
+          (!app.isPackaged && process.env.LINGER_TEAMHUB_HEALTH_URL) ||
+          (origin ? new URL("/healthz", origin).toString() : undefined);
+        if (teamhubHealth) {
+          probes.push({
+            name: "teamhub-healthz",
+            check: async () => {
+              const res = await fetch(teamhubHealth).catch(() => undefined);
+              return res?.ok ?? false;
+            },
+          });
+        }
       }
       return probes;
     },
@@ -417,6 +502,7 @@ async function main(): Promise<void> {
     new TrayModule({ quit: () => void quit() }),
     new DesktopIpcModule({
       defaultDisplayName,
+      shellVersion,
       ...(desktopPermissions ? { permissions: desktopPermissions } : {}),
     }),
   ];
