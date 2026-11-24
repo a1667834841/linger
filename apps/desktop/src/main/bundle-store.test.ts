@@ -1,7 +1,9 @@
-import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { zstdCompressSync } from "node:zlib";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -232,5 +234,47 @@ describe("BundleStoreModule", () => {
     expect(gc.removedNodeDeps).toContain("nd-deadbeef00000000");
     // Current release 0.2.0 remains intact!
     expect(existsSync(path.join(home, "releases/0.2.0/release.json"))).toBe(true);
+  });
+
+  it("cleans up corrupted pending.json on startup and rejects tar.zst path traversal entries", async () => {
+    const home = await makeTempDir("linger-corrupt-home-");
+    await mkdir(path.join(home, "state"), { recursive: true });
+    await writeFile(
+      path.join(home, "state/pending.json"),
+      "{truncated-corrupt-json",
+      "utf8",
+    );
+
+    const { store } = await startStore(home);
+    expect(existsSync(path.join(home, "state/pending.json"))).toBe(false);
+
+    // Build a minimal POSIX ustar archive containing a `../escape.txt` entry
+    const header = Buffer.alloc(512, 0);
+    const name = "../escape.txt";
+    header.write(name, 0, "utf8");
+    header.write("0000644\0", 100, "utf8");
+    header.write("0000000\0", 108, "utf8");
+    header.write("0000000\0", 116, "utf8");
+    header.write("00000000005\0", 124, "utf8");
+    header.write("00000000000\0", 136, "utf8");
+    header.fill(0x20, 148, 156);
+    header.write("0", 156, "utf8");
+    header.write("ustar\0", 257, "utf8");
+    header.write("00", 263, "utf8");
+    let checksum = 0;
+    for (let i = 0; i < 512; i++) checksum += header[i]!;
+    header.write(checksum.toString(8).padStart(6, "0") + "\0 ", 148, "utf8");
+    const body = Buffer.alloc(512, 0);
+    body.write("pwned", 0, "utf8");
+    const trailer = Buffer.alloc(1024, 0);
+    const rawTar = Buffer.concat([header, body, trailer]);
+    const zstBytes = zstdCompressSync(rawTar);
+    const archivePath = path.join(home, "evil.tar.zst");
+    await writeFile(archivePath, zstBytes);
+    const sha = createHash("sha256").update(zstBytes).digest("hex");
+
+    await expect(
+      store.stageModuleArchive("web", "web-evil00000000", archivePath, sha),
+    ).rejects.toThrow("Unsafe tar archive entry rejected");
   });
 });

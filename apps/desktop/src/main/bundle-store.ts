@@ -74,6 +74,23 @@ async function sha256File(filePath: string): Promise<string> {
   return hash.digest("hex");
 }
 
+function assertSafeTarEntries(listOutput: string): void {
+  const lines = listOutput
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  for (const entry of lines) {
+    const normalized = entry.replace(/\\/g, "/");
+    if (
+      normalized.startsWith("/") ||
+      /^[A-Za-z]:/.test(normalized) ||
+      normalized.split("/").includes("..")
+    ) {
+      throw new Error(`Unsafe tar archive entry rejected: ${entry}`);
+    }
+  }
+}
+
 async function extractTarZstArchive(
   archivePath: string,
   destinationDir: string,
@@ -86,6 +103,8 @@ async function extractTarZstArchive(
       createZstdDecompress(),
       createWriteStream(tarTemp, { mode: 0o600 }),
     );
+    const { stdout: entries } = await runExec("tar", ["-tf", tarTemp]);
+    assertSafeTarEntries(entries);
     await runExec("tar", ["-xf", tarTemp, "-C", destinationDir]);
   } finally {
     await rm(tarTemp, { force: true }).catch(() => undefined);
@@ -139,12 +158,20 @@ export class BundleStoreModule implements Module {
     await mkdir(this.infraDir, { recursive: true, mode: 0o700 });
     await mkdir(this.downloadsDir, { recursive: true, mode: 0o700 });
 
-    // Crash recovery: if a previous switch died mid-flight leaving pending.json
-    // while current.json still points to the old release, discard pending.json.
-    const pending = await this.readPending();
-    if (pending) {
-      ctx.log.warn("bundle_store.discarded_stale_pending", {
-        appVersion: pending.appVersion,
+    // Crash recovery: if a previous switch died mid-flight leaving a stale or
+    // corrupted pending.json while current.json still points to the old release,
+    // discard pending.json so startup recovers cleanly.
+    try {
+      const pending = await this.readPending();
+      if (pending) {
+        ctx.log.warn("bundle_store.discarded_stale_pending", {
+          appVersion: pending.appVersion,
+        });
+        await rm(this.#pointerPath("pending"), { force: true });
+      }
+    } catch (error) {
+      ctx.log.warn("bundle_store.discarded_corrupt_pending", {
+        error: error instanceof Error ? error.message : String(error),
       });
       await rm(this.#pointerPath("pending"), { force: true });
     }
