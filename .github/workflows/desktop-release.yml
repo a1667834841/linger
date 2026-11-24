@@ -13,7 +13,7 @@ name: Desktop release
 # releases.
 on:
   push:
-    tags: ["desktop-v*"]
+    tags: ["desktop-v*", "shell-v*"]
   workflow_dispatch:
     inputs:
       version:
@@ -21,6 +21,10 @@ on:
         required: true
       publish:
         description: Also create the desktop-v<version> release at this commit
+        type: boolean
+        default: false
+      shared_node_runtime:
+        description: V2 shell mode — share a single Node.js 26 runtime instead of bundling Node twice
         type: boolean
         default: false
 
