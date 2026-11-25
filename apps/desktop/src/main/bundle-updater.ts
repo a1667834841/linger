@@ -16,11 +16,13 @@ import type { Module, ModuleContext } from "./modules.js";
 import {
   DEFAULT_FEED_URL,
   ManifestError,
+  UPDATE_CHANNELS,
   UPDATE_PUBLIC_KEY,
   channelFeedUrls,
   compareVersions,
   evaluateShellCompatibility,
   isInRolloutBucket,
+  resolveArtifactUrl,
   verifyAppManifestV3,
   type AppManifestV3,
   type ArtifactRef,
@@ -78,6 +80,28 @@ const MODULE_IDS: readonly BundleModuleId[] = [
 function shortNodeDepsId(hash: string): string {
   const hex = hash.replace(/^sha256:/, "");
   return `nd-${hex.slice(0, 16)}`;
+}
+
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+
+function isAllowedFeedUrl(url: URL): boolean {
+  if (url.protocol === "https:") return true;
+  if (
+    url.protocol === "http:" &&
+    process.env.LINGER_ALLOW_LOOPBACK_TEST_FEED === "1" &&
+    LOOPBACK_HOSTS.has(url.hostname)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function parseEnvChannel(raw: string | undefined): UpdateChannel | undefined {
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  return (UPDATE_CHANNELS as readonly string[]).includes(trimmed)
+    ? (trimmed as UpdateChannel)
+    : undefined;
 }
 
 /**
@@ -148,8 +172,14 @@ export class BundleUpdaterModule implements Module {
     const ctx = this.#ctx!;
     const store = ctx.get<BundleStoreModule>("BundleStore");
     const cfg = ctx.config.get();
-    const feed = cfg.updateFeedUrl ?? DEFAULT_FEED_URL;
-    const channel: UpdateChannel = cfg.updateChannel ?? "stable";
+    const feed =
+      process.env.LINGER_UPDATE_FEED_URL?.trim() ||
+      cfg.updateFeedUrl ||
+      DEFAULT_FEED_URL;
+    const channel: UpdateChannel =
+      parseEnvChannel(process.env.LINGER_UPDATE_CHANNEL) ??
+      cfg.updateChannel ??
+      "stable";
     const installId = cfg.installId ?? "default-install";
     const publicKey = this.#options.publicKey ?? UPDATE_PUBLIC_KEY;
 
@@ -214,6 +244,7 @@ export class BundleUpdaterModule implements Module {
 
       const changedModules = await this.#downloadAndStageDiff(
         resolved,
+        feed,
         store,
         currentDesc,
       );
@@ -303,6 +334,7 @@ export class BundleUpdaterModule implements Module {
 
   async #downloadAndStageDiff(
     manifest: AppManifestV3,
+    feed: string,
     store: BundleStoreModule,
     currentDesc: LocalReleaseDescriptor | undefined,
   ): Promise<BundleId[]> {
@@ -380,16 +412,21 @@ export class BundleUpdaterModule implements Module {
         store.downloadsDir,
         `${task.artifact.artifactId}.tar.zst`,
       );
-      await this.#downloadWithMirrors(task.artifact, destFile, (chunkBytes) => {
-        bytesDownloaded += chunkBytes;
-        this.#setState({
-          kind: "downloading",
-          version: manifest.appVersion,
-          changedModules,
-          bytesDownloaded,
-          bytesTotal,
-        });
-      });
+      await this.#downloadWithMirrors(
+        feed,
+        task.artifact,
+        destFile,
+        (chunkBytes) => {
+          bytesDownloaded += chunkBytes;
+          this.#setState({
+            kind: "downloading",
+            version: manifest.appVersion,
+            changedModules,
+            bytesDownloaded,
+            bytesTotal,
+          });
+        },
+      );
       try {
         if (task.id === "node-native-deps" && task.nodeDepsShortId) {
           await store.stageNodeDepsArchive(
@@ -436,7 +473,7 @@ export class BundleUpdaterModule implements Module {
   }
 
   async #getBytes(url: URL): Promise<Buffer | undefined> {
-    if (url.protocol !== "https:") {
+    if (!isAllowedFeedUrl(url)) {
       throw new ManifestError("Update feed URL must use https");
     }
     const response = await (this.#options.fetch ?? fetch)(url);
@@ -448,6 +485,7 @@ export class BundleUpdaterModule implements Module {
   }
 
   async #downloadWithMirrors(
+    feed: string,
     artifact: ArtifactRef,
     destPath: string,
     onProgress: (deltaBytes: number) => void,
@@ -456,7 +494,12 @@ export class BundleUpdaterModule implements Module {
     let lastError: unknown;
     for (const candidate of candidates) {
       try {
-        await this.#downloadSingle(new URL(candidate), artifact, destPath, onProgress);
+        await this.#downloadSingle(
+          resolveArtifactUrl(feed, candidate),
+          artifact,
+          destPath,
+          onProgress,
+        );
         return;
       } catch (error) {
         lastError = error;
@@ -472,7 +515,7 @@ export class BundleUpdaterModule implements Module {
     destPath: string,
     onProgress: (deltaBytes: number) => void,
   ): Promise<void> {
-    if (url.protocol !== "https:") {
+    if (!isAllowedFeedUrl(url)) {
       throw new Error(`Refusing non-HTTPS artifact URL: ${url.toString()}`);
     }
     await mkdir(path.dirname(destPath), { recursive: true, mode: 0o700 });

@@ -333,9 +333,26 @@ async function main(): Promise<void> {
     !app.isPackaged && process.env.LINGER_UPDATE_PUBLIC_KEY_FILE
       ? readFileSync(process.env.LINGER_UPDATE_PUBLIC_KEY_FILE, "utf8")
       : undefined;
+  const hasCustomUpdateFeed = Boolean(
+    process.env.LINGER_UPDATE_FEED_URL?.trim() || config.get().updateFeedUrl,
+  );
+  const rawCheckDelay = process.env.LINGER_BUNDLE_CHECK_DELAY_MS
+    ? Number(process.env.LINGER_BUNDLE_CHECK_DELAY_MS)
+    : undefined;
   const bundleCheckDelayMs =
-    !app.isPackaged && process.env.LINGER_BUNDLE_CHECK_DELAY_MS
-      ? Number(process.env.LINGER_BUNDLE_CHECK_DELAY_MS)
+    rawCheckDelay !== undefined &&
+    Number.isFinite(rawCheckDelay) &&
+    (!app.isPackaged || (hasCustomUpdateFeed && rawCheckDelay >= 1_000))
+      ? rawCheckDelay
+      : undefined;
+  const rawCheckInterval = process.env.LINGER_BUNDLE_CHECK_INTERVAL_MS
+    ? Number(process.env.LINGER_BUNDLE_CHECK_INTERVAL_MS)
+    : undefined;
+  const bundleCheckIntervalMs =
+    rawCheckInterval !== undefined &&
+    Number.isFinite(rawCheckInterval) &&
+    (!app.isPackaged || (hasCustomUpdateFeed && rawCheckInterval >= 5_000))
+      ? rawCheckInterval
       : undefined;
 
   const bundleStore = new BundleStoreModule({
@@ -348,8 +365,11 @@ async function main(): Promise<void> {
     target: bundleTarget,
     enabled: app.isPackaged || process.env.LINGER_ENABLE_BUNDLE_UPDATER === "1",
     ...(bundlePublicKey ? { publicKey: bundlePublicKey } : {}),
-    ...(bundleCheckDelayMs !== undefined && Number.isFinite(bundleCheckDelayMs)
+    ...(bundleCheckDelayMs !== undefined
       ? { checkDelayMs: bundleCheckDelayMs }
+      : {}),
+    ...(bundleCheckIntervalMs !== undefined
+      ? { checkIntervalMs: bundleCheckIntervalMs }
       : {}),
   });
   const runExec = promisify(execFile);

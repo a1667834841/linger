@@ -12,6 +12,7 @@ import mark16 from "../../resources/tray/mark-16.png";
 import mark32 from "../../resources/tray/mark-32.png";
 import tile16 from "../../resources/tray/tile-16.png";
 import tile32 from "../../resources/tray/tile-32.png";
+import type { BundleUpdaterModule } from "./bundle-updater.js";
 import type { DiagnosticsModule } from "./diagnostics.js";
 import { diagnosticsDialogs } from "./diagnostics-dialogs.js";
 import { sendWithPrompts } from "./diagnostics-upload.js";
@@ -19,12 +20,13 @@ import { EnrollmentError, type EnrollmentModule } from "./enrollment.js";
 import type { LanguageModule } from "./language.js";
 import type { Module, ModuleContext } from "./modules.js";
 import type { PowerGuardModule } from "./power-guard.js";
+import type { ReleaseOrchestratorModule } from "./release-orchestrator.js";
 import type { SetupWindowModule } from "./setup-window.js";
 import type { StatusModule, StatusTone } from "./status.js";
 import { renderTrayIcon, type TrayArtwork } from "./tray-icon.js";
 import { trayMenu, type TrayAction, type TrayMenuItem } from "./tray-menu.js";
 import { trayMessages } from "./tray.messages.js";
-import type { UpdaterModule } from "./updater.js";
+import type { UpdaterModule, UpdateState } from "./updater.js";
 import type { WindowManagerModule } from "./window-manager.js";
 
 export interface TrayOptions {
@@ -104,6 +106,7 @@ export class TrayModule implements Module {
       ctx.bus.on("status.changed", () => this.#refresh()),
       ctx.bus.on("power.changed", () => this.#refresh()),
       ctx.bus.on("update.changed", () => this.#refresh()),
+      ctx.bus.on("bundle.update_changed", () => this.#refresh()),
       ctx.bus.on("language.changed", () => this.#refresh()),
     );
     this.#refresh();
@@ -155,10 +158,32 @@ export class TrayModule implements Module {
     return image;
   }
 
+  #optional<T extends Module>(name: string): T | undefined {
+    try {
+      return this.#ctx!.get<T>(name);
+    } catch {
+      return undefined;
+    }
+  }
+
+  #mergedUpdateState(): UpdateState {
+    const shellUpdate = this.#ctx!.get<UpdaterModule>("Updater").state();
+    if (shellUpdate.kind !== "idle") return shellUpdate;
+    const orch = this.#optional<ReleaseOrchestratorModule>("ReleaseOrchestrator")?.state();
+    if (orch?.kind === "ready") return { kind: "ready", version: orch.version };
+    if (orch?.kind === "waiting") return { kind: "waiting", version: orch.version };
+    if (orch?.kind === "applying") return { kind: "installing", version: orch.version };
+    const bundle = this.#optional<BundleUpdaterModule>("BundleUpdater")?.state();
+    if (bundle?.kind === "downloading") return { kind: "downloading", version: bundle.version };
+    if (bundle?.kind === "checking") return { kind: "checking" };
+    if (bundle?.kind === "failed") return { kind: "failed", error: bundle.error };
+    return shellUpdate;
+  }
+
   #menu(): Menu {
     const power = this.#ctx!.get<PowerGuardModule>("PowerGuard");
     const status = this.#status();
-    const update = this.#ctx!.get<UpdaterModule>("Updater").state();
+    const update = this.#mergedUpdateState();
     const items = trayMenu(
       {
         status,
@@ -201,11 +226,23 @@ export class TrayModule implements Module {
         power.setAlwaysOn(!power.alwaysOn());
         break;
       }
-      case "install-update":
-        void ctx.get<UpdaterModule>("Updater").install();
+      case "install-update": {
+        const updater = ctx.get<UpdaterModule>("Updater");
+        const orchestrator = this.#optional<ReleaseOrchestratorModule>("ReleaseOrchestrator");
+        const orchState = orchestrator?.state();
+        if (
+          updater.state().kind === "idle" &&
+          (orchState?.kind === "ready" || orchState?.kind === "waiting")
+        ) {
+          void orchestrator!.applyStaged();
+        } else {
+          void updater.install();
+        }
         break;
+      }
       case "check-update":
         void ctx.get<UpdaterModule>("Updater").check();
+        void this.#optional<BundleUpdaterModule>("BundleUpdater")?.check();
         break;
       case "show-logs":
       case "save-diagnostics": {

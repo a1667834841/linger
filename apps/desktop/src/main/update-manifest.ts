@@ -26,9 +26,32 @@ const SAFE_ARTIFACT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const HTTPS_URL = z
   .string()
   .url()
-  .refine((value) => new URL(value).protocol === "https:", {
-    message: "URL must use https",
-  });
+  .refine(
+    (value) => {
+      try {
+        return new URL(value).protocol === "https:";
+      } catch {
+        return false;
+      }
+    },
+    {
+      message: "URL must use https",
+    },
+  );
+// Safe feed-relative bundle path (e.g. `bundles/web/web-abc123.tar.zst`) so a
+// single Ed25519-signed manifest stays verifiable across any HTTPS CDN, mirror,
+// or local/LAN test feed host without re-signing.
+const RELATIVE_BUNDLE_PATH = z
+  .string()
+  .regex(/^bundles\/[A-Za-z0-9._/-]+$/, "Relative bundle path must stay under bundles/")
+  .refine(
+    (value) =>
+      !value.includes("..") &&
+      !value.includes("//") &&
+      !value.endsWith("/"),
+    { message: "Relative bundle path must be normalized and traversal-free" },
+  );
+const ARTIFACT_URL = z.union([HTTPS_URL, RELATIVE_BUNDLE_PATH]);
 
 const updatePackage = z.object({
   // A bare file name: the package always comes from the manifest's release.
@@ -75,8 +98,8 @@ const deltaPatchRef = z.object({
   fromSha256: z.string().regex(SHA256),
   fromArtifactId: z.string().regex(SAFE_ARTIFACT_ID),
   algorithm: z.literal("zstd-patch"),
-  url: HTTPS_URL,
-  mirrors: z.array(HTTPS_URL).optional(),
+  url: ARTIFACT_URL,
+  mirrors: z.array(ARTIFACT_URL).optional(),
   sha256: z.string().regex(SHA256),
   size: z.number().int().positive(),
 });
@@ -85,8 +108,8 @@ export type DeltaPatchRef = z.infer<typeof deltaPatchRef>;
 const artifactRef = z.object({
   artifactId: z.string().regex(SAFE_ARTIFACT_ID),
   format: z.enum(["tar.zst", "tar.gz", "exe"]),
-  url: HTTPS_URL,
-  mirrors: z.array(HTTPS_URL).optional(),
+  url: ARTIFACT_URL,
+  mirrors: z.array(ARTIFACT_URL).optional(),
   sha256: z.string().regex(SHA256),
   size: z.number().int().positive(),
   signed: z.enum(["developer-id", "authenticode", "none"]).optional(),
@@ -223,6 +246,17 @@ export function channelFeedUrls(
 
 export function packageUrl(feed: string, version: string, file: string): URL {
   return new URL(`download/desktop-v${version}/${file}`, releases(feed));
+}
+
+/**
+ * Resolves a Schema 3 artifact URL against `feed`. Absolute `https://` URLs are
+ * kept verbatim; relative `bundles/...` paths resolve under the feed root.
+ */
+export function resolveArtifactUrl(feed: string, candidate: string): URL {
+  if (/^https:\/\//i.test(candidate)) {
+    return new URL(candidate);
+  }
+  return new URL(candidate, releases(feed));
 }
 
 // The release's page, where a person downloads the package themselves.

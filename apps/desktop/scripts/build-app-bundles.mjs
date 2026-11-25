@@ -141,11 +141,12 @@ export function assembleManifestV3({
   mirrorBaseUrls = [],
 }) {
   const makeUrls = (bundleId, fileName) => {
-    const cleanBase = baseUrl.replace(/\/+$/, "");
-    const url = `${cleanBase}/bundles/${bundleId}/${fileName}`;
+    const relPath = `bundles/${bundleId}/${fileName}`;
+    const isRelative = !baseUrl || baseUrl === "relative";
+    const url = isRelative ? relPath : `${baseUrl.replace(/\/+$/, "")}/${relPath}`;
     const mirrors = mirrorBaseUrls
       .filter(Boolean)
-      .map((m) => `${m.replace(/\/+$/, "")}/bundles/${bundleId}/${fileName}`);
+      .map((m) => `${m.replace(/\/+$/, "")}/${relPath}`);
     return mirrors.length > 0 ? { url, mirrors } : { url };
   };
 
