@@ -80,8 +80,9 @@ type Service struct {
 
 func New(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }
 
-// SetConnectedApps makes the connected app actions depend on configured: while
-// it reports false they are outside the allowlist. Without it they are allowed.
+// SetConnectedApps supplies the managed-provider availability check. Agent
+// authorization uses it for auto-reminders. Tool search and execution check
+// provider availability after resolving the Agent's grants.
 func (s *Service) SetConnectedApps(configured func() bool) { s.connectedApps = configured }
 
 // ConnectedAppsConfigured reports whether managed connector operations are available.
