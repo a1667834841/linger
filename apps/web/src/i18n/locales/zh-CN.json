@@ -959,6 +959,8 @@
     "add": "添加",
     "optionalApp": "{description} · 可选",
     "notInstalled": "未安装",
+    "needsNewerLinger": "需要更新 Linger",
+    "needsNewerLingerHint": "在 {computer} 上更新 Linger 后才能添加 {app}",
     "lastSeenSignedOut": "上次在线时未登录",
     "lastCheckFailed": "上次检查失败",
     "lastSeenOutdated": "上次在线时版本过旧",

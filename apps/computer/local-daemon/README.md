@@ -505,6 +505,23 @@ heredoc (`internal/permission/shell_text.go`). Named variables such as `"$id"`,
 
 A hook that cannot run lets the command through.
 
+## Runtime discovery
+
+- Discovery searches the `PATH` the user's terminal has: `$SHELL -lic`
+  prints it within two seconds. When that read fails or times out, the
+  last `PATH` the same shell printed is used. With none, the user's own
+  install folders come first. The common install folders are always
+  searched too: Homebrew, `~/.local/bin`, `~/.npm-global/bin`, Volta, Bun,
+  every nvm Node's `bin` (newest first), fnm's default Node and pnpm's
+  global bin.
+- Every 15 seconds the monitor rechecks sign-in. Every fourth tick it runs a
+  full discovery, but not while an Operation runs.
+- On every tick it also searches again for each Runtime that was not
+  installed or too old. When an executable appears, or a new file replaces
+  the old one, it runs discovery for those Runtimes alone at once, even
+  while Operations run, because none can run on them. An install or upgrade
+  therefore shows within one tick.
+
 ## Antigravity
 
 The Antigravity CLI (`agy`) runs through its Agent Client Protocol (ACP)

@@ -625,7 +625,11 @@ export class RunnerConnections {
       }
       await this.context.computerRegistry?.touch(connection.runnerId, {
         status: "online",
-        seenAt: envelope.sent_at,
+        // The Gateway's clock, as for heartbeats: TeamHub ignores a write
+        // that is not newer than the last one, so a Computer clock behind
+        // the Gateway's would drop this change for good, and one ahead would
+        // put the Computer's last-seen time in the future.
+        seenAt: new Date().toISOString(),
         runtimes: connection.hello.runtimes,
         runtimeDiagnostics: envelope.runtime_diagnostics,
       });
