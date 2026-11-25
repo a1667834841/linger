@@ -277,6 +277,7 @@ jobs:
           node apps/teamhub-cli/scripts/build-cli.mjs --outdir "$stage/teamhub-cli"
           cp apps/desktop/scripts/teamhub.sh "$stage/teamhub-cli/teamhub"
           chmod +x "$stage/teamhub-cli/teamhub"
+          printf '@echo off\r\nsetlocal\r\nset "app=%%~dp0..\\..\\..\\..\\Linger.exe"\r\nif not exist "%%app%%" set "app=node"\r\nset ELECTRON_RUN_AS_NODE=1\r\n"%%app%%" --use-env-proxy "%%~dp0teamhub.js" %%*\r\n' >"$stage/teamhub-cli/teamhub.cmd"
 
           echo "==> 3/5 Building node-services (when present in checkout)"
           if [ -d apps/node-services/src ] && [ -d apps/voice-runtime/src ]; then
