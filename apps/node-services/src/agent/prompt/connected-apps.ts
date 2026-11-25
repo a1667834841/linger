@@ -45,7 +45,11 @@ export function mailCanvasRule(keys: readonly string[]): string {
 
 /** Names the apps the Agent could use when the Run started, by app key. */
 export function connectedAppsAtRunStart(keys: readonly string[]): string {
-  return keys.length === 0
-    ? "no app had an account you can use"
-    : `these apps had an account you can use: ${keys.join(", ")}`;
+  const connected =
+    keys.length === 0
+      ? "no app had an account you can use"
+      : `these apps had an account you can use: ${keys.join(", ")}`;
+  return keys.includes("custom_mcp")
+    ? `${connected}. For a custom MCP connector, use teamhub apps list to see the granted connector names and IDs, then use teamhub apps search with the connection ID to find its tools. Custom calls wait for the Human's confirmation.`
+    : connected;
 }
