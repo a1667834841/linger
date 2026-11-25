@@ -9,7 +9,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentauth"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentconnectedapps"
-	"github.com/simplexai-labs/linger/apps/teamhub/internal/externalsource"
 	idgen "github.com/simplexai-labs/linger/apps/teamhub/internal/ids"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/messagecreation"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/typedcard"
@@ -28,11 +27,7 @@ func (a *App) writeConnectedAppResult(c *gin.Context, token string, result agent
 	}
 	prepared := *result.Confirmation
 	ctx := c.Request.Context()
-	authCtx := ctx
-	if prepared.Connection.AppKey == externalsource.CustomMCPAppKey {
-		authCtx = agentauth.WithCustomConnector(ctx)
-	}
-	auth, err := a.agentAuth.Authorize(authCtx, token, "execute_app_tool")
+	auth, err := a.agentAuth.Authorize(ctx, token, "execute_app_tool")
 	if a.writeAgentAuthError(c, "request connector confirmation", err) {
 		return
 	}

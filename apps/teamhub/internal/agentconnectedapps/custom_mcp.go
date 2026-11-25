@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/custommcp"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/externalsource"
@@ -53,11 +55,7 @@ func (s *Service) searchCustomMCPTools(ctx context.Context, connection externals
 		return nil, err
 	}
 	result := make([]AppTool, 0, min(limit, len(tools)))
-	query = strings.ToLower(query)
-	for _, tool := range tools {
-		if query != "*" && !strings.Contains(strings.ToLower(connection.DisplayName+" "+tool.Name+" "+tool.Description), query) {
-			continue
-		}
+	for _, tool := range rankCustomMCPTools(tools, connection.DisplayName, query) {
 		var schema map[string]any
 		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
 			return nil, err
@@ -72,6 +70,43 @@ func (s *Service) searchCustomMCPTools(ctx context.Context, connection externals
 		}
 	}
 	return result, nil
+}
+
+func rankCustomMCPTools(tools []custommcp.Tool, connector, query string) []custommcp.Tool {
+	if query == "*" {
+		return tools
+	}
+	query = strings.ToLower(query)
+	terms := strings.FieldsFunc(query, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsNumber(r) })
+	type match struct {
+		tool  custommcp.Tool
+		score int
+	}
+	matches := make([]match, 0, len(tools))
+	for _, tool := range tools {
+		name := strings.ToLower(tool.Name)
+		description := strings.ToLower(connector + " " + tool.Description)
+		score := 0
+		if name == query {
+			score = 1 + 2*len(terms)
+		}
+		for _, term := range terms {
+			if strings.Contains(name, term) {
+				score += 2
+			} else if strings.Contains(description, term) {
+				score++
+			}
+		}
+		if score > 0 {
+			matches = append(matches, match{tool, score})
+		}
+	}
+	slices.SortStableFunc(matches, func(a, b match) int { return b.score - a.score })
+	result := make([]custommcp.Tool, 0, len(matches))
+	for _, match := range matches {
+		result = append(result, match.tool)
+	}
+	return result
 }
 
 func (s *Service) prepareCustomMCP(ctx context.Context, connection externalsource.AgentToolConnection, action confirmationAction) (Result, error) {
@@ -97,11 +132,17 @@ func (s *Service) invokeConfirmedCustomMCP(ctx context.Context, connection exter
 	if errors.Is(err, externalsource.ErrNotActive) {
 		return "failed", "The custom connector is no longer active.", nil
 	}
+	if errors.Is(err, custommcp.ErrNotDispatched) || errors.Is(err, custommcp.ErrUnauthorized) || errors.Is(err, custommcp.ErrInvalid) {
+		return "failed", "TeamHub could not dispatch the call to the custom MCP server.", nil
+	}
 	var response struct {
 		IsError bool `json:"isError"`
 	}
-	if err != nil || json.Unmarshal(result, &response) != nil || response.IsError {
+	if err != nil || json.Unmarshal(result, &response) != nil {
 		return "unknown", "The custom MCP server did not confirm success. Check the server before retrying.", nil
+	}
+	if response.IsError {
+		return "failed", "The custom MCP tool reported an error.", result
 	}
 	return "succeeded", "", result
 }

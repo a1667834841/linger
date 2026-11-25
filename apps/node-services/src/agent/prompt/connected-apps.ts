@@ -50,6 +50,6 @@ export function connectedAppsAtRunStart(keys: readonly string[]): string {
       ? "no app had an account you can use"
       : `these apps had an account you can use: ${keys.join(", ")}`;
   return keys.includes("custom_mcp")
-    ? `${connected}. For a custom MCP connector, use teamhub apps list to see the granted connector names and IDs, then use teamhub apps search with the connection ID to find its tools. Custom calls wait for the Human's confirmation.`
+    ? `${connected}. For a custom MCP connector, use teamhub apps list to see the granted connector names and IDs, then use teamhub apps search "<tool name or keywords>" --connectionId <id>. Use "*" as the query to preview the first page of tools, or search for a specific tool by name. Custom calls wait for the Human's confirmation.`
     : connected;
 }

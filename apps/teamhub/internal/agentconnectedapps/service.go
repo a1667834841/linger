@@ -239,7 +239,7 @@ func (s *Service) Search(ctx context.Context, token string, input SearchInput) (
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	authorization, err := s.contexts.AuthorizeInTx(agentauth.WithCustomConnector(ctx), tx, token, "search_app_tools")
+	authorization, err := s.contexts.AuthorizeInTx(ctx, tx, token, "search_app_tools")
 	if err != nil {
 		return nil, err
 	}
@@ -298,9 +298,6 @@ func (s *Service) Execute(ctx context.Context, token string, input ExecuteInput)
 	}
 	if s == nil || s.pool == nil || s.contexts == nil || s.connections == nil || s.provider == nil {
 		return Result{}, unavailableError(nil)
-	}
-	if strings.HasPrefix(input.ToolSlug, "MCP_") {
-		ctx = agentauth.WithCustomConnector(ctx)
 	}
 	return s.execute(ctx, input, func(ctx context.Context) (externalsource.AgentToolConnection, error) {
 		return s.authorizeExecution(ctx, token, input.ConnectionID)

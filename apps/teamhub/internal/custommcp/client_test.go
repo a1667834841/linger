@@ -13,7 +13,64 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
+
+func TestCallSeparatesHandshakeAndToolDeadlines(t *testing.T) {
+	client := NewClient()
+	client.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		var request struct {
+			ID     int    `json:"id"`
+			Method string `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			return nil, err
+		}
+		deadline, ok := r.Context().Deadline()
+		if !ok {
+			t.Fatalf("no deadline for %s", request.Method)
+		}
+		remaining := time.Until(deadline)
+		reply := &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": {"application/json"}},
+			Body:       http.NoBody,
+		}
+		result := `{"protocolVersion":"2025-11-25","capabilities":{"tools":{}}}`
+		if request.Method == "tools/call" {
+			if remaining <= requestTimeout || remaining > toolTimeout {
+				t.Fatalf("tool deadline = %s", remaining)
+			}
+			result = `{"content":[]}`
+		} else {
+			if remaining <= 0 || remaining > requestTimeout {
+				t.Fatalf("handshake deadline = %s", remaining)
+			}
+			if request.Method == "notifications/initialized" {
+				reply.StatusCode = http.StatusAccepted
+				return reply, nil
+			}
+		}
+		reply.Body = io.NopCloser(strings.NewReader(fmt.Sprintf(
+			`{"jsonrpc":"2.0","id":%d,"result":%s}`, request.ID, result,
+		)))
+		return reply, nil
+	})
+	if _, err := client.Call(t.Context(), "https://example.com/mcp", "", "echo", nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCallClassifiesHandshakeFailureBeforeDispatch(t *testing.T) {
+	client := NewClient()
+	client.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusUnauthorized, Body: http.NoBody}, nil
+	})
+	_, err := client.Call(t.Context(), "https://example.com/mcp", "", "echo", nil)
+	if !errors.Is(err, ErrUnauthorized) || !errors.Is(err, ErrNotDispatched) {
+		t.Fatalf("expected authentication failure before dispatch, got %v", err)
+	}
+}
 
 func TestDiscoverAndCallStreamableHTTP(t *testing.T) {
 	var mu sync.Mutex

@@ -247,5 +247,3 @@ func checkPage(page *url.URL) (*url.URL, error) {
 	page.RawFragment = ""
 	return page, nil
 }
-
-// Ranges that are not public beyond what netip's predicates cover.

@@ -193,7 +193,7 @@ func (s *Service) CustomMCPTools(ctx context.Context, connection AgentToolConnec
 // InvokeCustomMCP dispatches a permitted call at the pinned configuration revision.
 func (s *Service) InvokeCustomMCP(ctx context.Context, connection AgentToolConnection, name string, arguments map[string]any) (json.RawMessage, error) {
 	if s.customMCP == nil {
-		return nil, ErrUnavailable
+		return nil, errors.Join(custommcp.ErrNotDispatched, ErrUnavailable)
 	}
 	var endpoint string
 	var sealed []byte
@@ -205,16 +205,16 @@ func (s *Service) InvokeCustomMCP(ctx context.Context, connection AgentToolConne
 		return nil, ErrNotActive
 	}
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(custommcp.ErrNotDispatched, err)
 	}
 	var token []byte
 	if len(sealed) != 0 {
 		if s.customMCP.box == nil {
-			return nil, ErrUnavailable
+			return nil, errors.Join(custommcp.ErrNotDispatched, ErrUnavailable)
 		}
 		token, err = s.customMCP.box.Open(sealed)
 		if err != nil {
-			return nil, err
+			return nil, errors.Join(custommcp.ErrNotDispatched, err)
 		}
 	}
 	return s.customMCP.client.Call(ctx, endpoint, string(token), name, arguments)
