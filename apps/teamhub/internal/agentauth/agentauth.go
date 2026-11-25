@@ -84,14 +84,6 @@ func New(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }
 // it reports false they are outside the allowlist. Without it they are allowed.
 func (s *Service) SetConnectedApps(configured func() bool) { s.connectedApps = configured }
 
-type customConnectorKey struct{}
-
-// WithCustomConnector permits provider-independent connector authorization.
-// The caller must still check the connection grant and its provider.
-func WithCustomConnector(ctx context.Context) context.Context {
-	return context.WithValue(ctx, customConnectorKey{}, true)
-}
-
 // ConnectedAppsConfigured reports whether managed connector operations are available.
 func (s *Service) ConnectedAppsConfigured() bool {
 	return s.connectedApps == nil || s.connectedApps()
@@ -122,20 +114,18 @@ func (s *Service) AuthorizeInTx(ctx context.Context, tx pgx.Tx, token, action st
 	if tx == nil || !strings.HasPrefix(token, "th_agent_") {
 		return Authorization{}, ErrCredentialInvalid
 	}
-	custom, _ := ctx.Value(customConnectorKey{}).(bool)
-	if !s.actionConfigured(action) && !(custom && (action == "search_app_tools" || action == "execute_app_tool")) {
+	if !s.actionConfigured(action) {
 		return Authorization{}, ErrProviderKeyRequired
 	}
 	return authorizeAgentPrincipal(ctx, tx, token, action)
 }
 
 // actionConfigured reports whether the deployment currently runs the feature
-// behind action. The connected app actions that reach Composio need a
-// Composio API key; listing the Agent's grants and asking for a connection do
-// not, so an Agent can ask the user for the key.
+// behind action. Tool search and execution check provider availability after
+// resolving the Agent's grants.
 func (s *Service) actionConfigured(action string) bool {
 	switch action {
-	case "search_app_tools", "execute_app_tool", "manage_auto_reminders":
+	case "manage_auto_reminders":
 		return s.ConnectedAppsConfigured()
 	}
 	return true

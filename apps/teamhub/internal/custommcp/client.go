@@ -22,6 +22,7 @@ import (
 
 const (
 	requestTimeout = 15 * time.Second
+	toolTimeout    = 55 * time.Second
 	maxResponse    = 1 << 20
 	maxTools       = 200
 	protocol       = "2025-11-25"
@@ -34,6 +35,8 @@ var (
 	ErrUnauthorized = errors.New("the MCP server rejected authentication")
 	// ErrUnavailable identifies an unreachable or incompatible MCP server.
 	ErrUnavailable = errors.New("the MCP server is unavailable or returned an invalid response")
+	// ErrNotDispatched means the session failed before tools/call was sent.
+	ErrNotDispatched = errors.New("the MCP tool call was not dispatched")
 )
 
 // Tool is the remote name, description and input schema discovered from MCP.
@@ -65,7 +68,6 @@ func NewClient() *Client {
 			DialContext:            dialer.DialContext,
 			ForceAttemptHTTP2:      true,
 			TLSHandshakeTimeout:    5 * time.Second,
-			ResponseHeaderTimeout:  10 * time.Second,
 			MaxResponseHeaderBytes: 64 << 10,
 			MaxIdleConns:           16,
 			IdleConnTimeout:        30 * time.Second,
@@ -125,15 +127,20 @@ func (c *Client) Discover(ctx context.Context, endpoint, token string) ([]Tool, 
 
 // Call invokes one tool without retrying an operation that may have run.
 func (c *Client) Call(ctx context.Context, endpoint, token, name string, arguments map[string]any) (json.RawMessage, error) {
-	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
-	defer cancel()
-	session, err := c.open(ctx, endpoint, token)
+	handshake, cancelHandshake := context.WithTimeout(ctx, requestTimeout)
+	session, err := c.open(handshake, endpoint, token)
+	cancelHandshake()
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(ErrNotDispatched, err)
 	}
 	defer session.close(ctx)
+	call, cancelCall := context.WithTimeout(ctx, toolTimeout)
+	defer cancelCall()
+	if err := call.Err(); err != nil {
+		return nil, errors.Join(ErrNotDispatched, err)
+	}
 	var result json.RawMessage
-	err = session.post(ctx, 2, "tools/call", map[string]any{"name": name, "arguments": arguments}, &result)
+	err = session.post(call, 2, "tools/call", map[string]any{"name": name, "arguments": arguments}, &result)
 	if err == nil && replyContainsToken(result, token) {
 		return nil, ErrUnavailable
 	}

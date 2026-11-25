@@ -40,6 +40,9 @@ func (f *customMCPFixture) Call(_ context.Context, endpoint, token, tool string,
 	if endpoint != "https://mcp.example.test/echo" || token != customMCPFixtureToken || tool != "echo" {
 		return nil, custommcp.ErrUnauthorized
 	}
+	if arguments["text"] == "tool error" {
+		return json.RawMessage(`{"isError":true,"content":[{"type":"text","text":"Echo limit reached"}]}`), nil
+	}
 	return json.Marshal(map[string]any{"structuredContent": map[string]any{"echo": arguments["text"]}})
 }
 
@@ -100,7 +103,7 @@ func TestCustomMCPConnectorFromSetupThroughAgentApproval(t *testing.T) {
 	const agentTools = "/api/agent/v1/apps/tools/"
 	search := func() (int, []byte) {
 		return postAgentInRoom(t, env, issued.AccessToken, roomID, agentTools+"search", map[string]any{
-			"query": "echo", "app_key": "custom_mcp", "connection_id": connector.ID,
+			"query": "echo a value", "app_key": "custom_mcp", "connection_id": connector.ID,
 		})
 	}
 	if code, body := search(); code != http.StatusConflict {
@@ -182,11 +185,18 @@ func TestCustomMCPConnectorFromSetupThroughAgentApproval(t *testing.T) {
 		`SELECT result->'data'->'structuredContent'->>'echo' FROM decisions WHERE id=$1`, first).Scan(&echo); err != nil || echo != "approved echo" {
 		t.Fatalf("approval result did not preserve the MCP response: %v", err)
 	}
+	rejected := submit("tool error")
+	approve(rejected, "failed")
+	var detail string
+	if err := env.pool.QueryRow(t.Context(),
+		`SELECT result->'data'->'content'->0->>'text' FROM decisions WHERE id=$1`, rejected).Scan(&detail); err != nil || detail != "Echo limit reached" {
+		t.Fatalf("approval result did not preserve the tool error: %v", err)
+	}
 	second := submit("revoked echo")
 	grant(false)
 	grant(true)
 	approve(second, "failed")
-	if provider.calls.Load() != 1 {
+	if provider.calls.Load() != 2 {
 		t.Fatal("revoked grant still dispatched a tool")
 	}
 	code, body = search()
@@ -203,7 +213,7 @@ func TestCustomMCPConnectorFromSetupThroughAgentApproval(t *testing.T) {
 		t.Fatalf("disconnect: %d %s", code, body)
 	}
 	approve(third, "failed")
-	if provider.calls.Load() != 1 {
+	if provider.calls.Load() != 2 {
 		t.Fatal("disconnected connector still dispatched a tool")
 	}
 	if code, body := search(); code != http.StatusConflict || !strings.Contains(string(body), "app_not_connected") {
