@@ -14,7 +14,12 @@ import { BundleStoreModule } from "./bundle-store.js";
 import { BundleUpdaterModule } from "./bundle-updater.js";
 import { ConfigStore } from "./config.js";
 import { EventBus, ModuleHost } from "./modules.js";
-import { compareVersions, resolveArtifactUrl } from "./update-manifest.js";
+import {
+  compareVersions,
+  evaluateShellCompatibility,
+  resolveArtifactUrl,
+  type AppManifestV3,
+} from "./update-manifest.js";
 
 const tempDirs: string[] = [];
 
@@ -36,24 +41,25 @@ afterEach(async () => {
 const noopLog = { info: () => {}, warn: () => {}, error: () => {} };
 
 describe("V2 signed test upgrade packs & portable feed server", () => {
-  it("derives deterministic SemVer-monotonic step versions from both -test and -v2test baseVersions", () => {
-    const versions = deriveStepVersions("0.2.0-test.0");
-    expect(versions["step-00-baseline"]).toBe("0.2.0-test.0");
-    expect(versions["step-01-web"]).toBe("0.2.1-test");
-    expect(versions["step-06-installer"]).toBe("0.2.6-test");
-    expect(versions["step-07-rollback-faulty"]).toBe("0.2.7-test-faulty");
-
-    const v2test = deriveStepVersions("0.2.0-v2test.0");
-    expect(v2test["step-00-baseline"]).toBe("0.2.0-v2test.0");
-    expect(v2test["step-01-web"]).toBe("0.2.1-v2test");
-    expect(v2test["step-04-teamhub"]).toBe("0.2.4-v2test");
-    expect(v2test["step-06-installer"]).toBe("0.2.6-v2test");
-    expect(v2test["step-07-rollback-faulty"]).toBe("0.2.7-v2test-faulty");
+  it("derives deterministic SemVer-monotonic step versions within 0.1.10-v2test.0..7 and -test.0..7", () => {
+    const v2test = deriveStepVersions("0.1.10-v2test.0");
+    expect(v2test["step-00-baseline"]).toBe("0.1.10-v2test.0");
+    expect(v2test["step-01-web"]).toBe("0.1.10-v2test.1");
+    expect(v2test["step-02-skills-prompts"]).toBe("0.1.10-v2test.2");
+    expect(v2test["step-03-node-services"]).toBe("0.1.10-v2test.3");
+    expect(v2test["step-04-teamhub"]).toBe("0.1.10-v2test.4");
+    expect(v2test["step-05-computer-daemon"]).toBe("0.1.10-v2test.5");
+    expect(v2test["step-06-installer"]).toBe("0.1.10-v2test.6");
+    expect(v2test["step-07-rollback-faulty"]).toBe("0.1.10-v2test.7");
 
     const ordered = Object.values(v2test);
     for (let i = 1; i < ordered.length; i += 1) {
       expect(compareVersions(ordered[i]!, ordered[i - 1]!)).toBeGreaterThan(0);
     }
+
+    const legacyTest = deriveStepVersions("0.1.10-test.0");
+    expect(legacyTest["step-00-baseline"]).toBe("0.1.10-test.0");
+    expect(legacyTest["step-07-rollback-faulty"]).toBe("0.1.10-test.7");
   });
 
   it("resolves portable relative bundle paths against any feed URL while keeping https URLs intact", () => {
@@ -97,7 +103,7 @@ describe("V2 signed test upgrade packs & portable feed server", () => {
 
     const built = await buildV2TestUpgradePacks({
       outDir: kitDir,
-      baseVersion: "0.2.0-test.0",
+      baseVersion: "0.1.10-v2test.0",
       baseUrl: "relative",
       ephemeralTestKey: true,
       macosSigned: true,
@@ -109,6 +115,17 @@ describe("V2 signed test upgrade packs & portable feed server", () => {
     expect(built.verification.ok).toBe(true);
     expect(built.verification.stepCount).toBe(8);
     expect(built.verification.steps.every((s) => s.signatureVerified)).toBe(true);
+
+    // Every step's minShellVersion MUST be satisfied by the 0.1.10-v2test.0 test shell!
+    for (const step of built.index.steps) {
+      const manifest = JSON.parse(
+        await readFile(path.join(kitDir, "steps", step.id, "app-manifest.json"), "utf8"),
+      ) as AppManifestV3;
+      expect(manifest.compat.minShellVersion).toBe("0.1.10-v2test.0");
+      expect(evaluateShellCompatibility(manifest, "0.1.10-v2test.0")).toEqual({
+        status: "compatible",
+      });
+    }
 
     const publicKeyPem = await readFile(
       path.join(kitDir, "test-public-key.pem"),
@@ -135,7 +152,7 @@ describe("V2 signed test upgrade packs & portable feed server", () => {
       });
       const bus = new EventBus();
       const updater = new BundleUpdaterModule({
-        shellVersion: "0.2.0",
+        shellVersion: "0.1.10-v2test.0",
         target: "darwin-arm64",
         enabled: true,
         checkDelayMs: 60 * 60_000,
@@ -162,7 +179,7 @@ describe("V2 signed test upgrade packs & portable feed server", () => {
       await updater.check();
       expect(updater.state()).toEqual({
         kind: "staged",
-        version: "0.2.0-test.0",
+        version: "0.1.10-v2test.0",
         changedModules: [
           "node-native-deps",
           "web",
@@ -175,8 +192,8 @@ describe("V2 signed test upgrade packs & portable feed server", () => {
       });
       // Commit step-00 as current release
       await store.beginPending({
-        appVersion: "0.2.0-test.0",
-        releaseFile: "releases/0.2.0-test.0/release.json",
+        appVersion: "0.1.10-v2test.0",
+        releaseFile: "releases/0.1.10-v2test.0/release.json",
         updatedAt: new Date().toISOString(),
       });
       await store.commitPending();
@@ -191,7 +208,7 @@ describe("V2 signed test upgrade packs & portable feed server", () => {
       await updater.check();
       expect(updater.state()).toEqual({
         kind: "staged",
-        version: "0.2.1-test",
+        version: "0.1.10-v2test.1",
         changedModules: ["web"],
       });
       const step1Downloads = server
@@ -200,16 +217,15 @@ describe("V2 signed test upgrade packs & portable feed server", () => {
       expect(step1Downloads).toHaveLength(1);
       expect(step1Downloads[0]?.path).toMatch(/^\/bundles\/web\/web-/);
 
-      // 4. Switch to step-04-teamhub -> verifies Ed25519 + downloads changed modules (teamhub + step02/03 diffs since we skipped 02/03)
-      // Commit step-01..03 sequentially to verify each individual step downloads strictly 1/7 bundle!
+      // 4. Commit step-01..07 sequentially to verify each step downloads strictly 1/7 bundle!
       for (const [stepNum, expectedVersion, expectedMod] of [
-        ["01", "0.2.1-test", "web"],
-        ["02", "0.2.2-test", "skills-prompts"],
-        ["03", "0.2.3-test", "node-services"],
-        ["04", "0.2.4-test", "teamhub"],
-        ["05", "0.2.5-test", "computer-daemon"],
-        ["06", "0.2.6-test", "installer"],
-        ["07", "0.2.7-test-faulty", "teamhub"],
+        ["01", "0.1.10-v2test.1", "web"],
+        ["02", "0.1.10-v2test.2", "skills-prompts"],
+        ["03", "0.1.10-v2test.3", "node-services"],
+        ["04", "0.1.10-v2test.4", "teamhub"],
+        ["05", "0.1.10-v2test.5", "computer-daemon"],
+        ["06", "0.1.10-v2test.6", "installer"],
+        ["07", "0.1.10-v2test.7", "teamhub"],
       ] as const) {
         if (stepNum !== "01") {
           const sw = await fetch(
@@ -239,7 +255,7 @@ describe("V2 signed test upgrade packs & portable feed server", () => {
       }
 
       // Confirm step-07 descriptor carries rollbackSafe: false
-      const step7Desc = await store.readRelease("0.2.7-test-faulty");
+      const step7Desc = await store.readRelease("0.1.10-v2test.7");
       expect(step7Desc?.compat.rollbackSafe).toBe(false);
 
       await host.stop("quit");

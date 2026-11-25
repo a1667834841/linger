@@ -1,12 +1,12 @@
 // Builds the complete Linger V2 per-service signed upgrade test kit:
-//   - step-00-baseline        (0.2.0-test.0) : baseline 7 bundles
-//   - step-01-web             (0.2.1-test)   : ONLY web changed (visible V2 badge, 0-downtime hot reload)
-//   - step-02-skills-prompts  (0.2.2-test)   : ONLY skills-prompts changed (0-downtime silent hot reload)
-//   - step-03-node-services   (0.2.3-test)   : ONLY node-services/voice-runtime changed (partial restart + drain)
-//   - step-04-teamhub         (0.2.4-test)   : ONLY teamhub Go binaries changed (3-platform signed)
-//   - step-05-computer-daemon (0.2.5-test)   : ONLY computer-daemon + teamhub-cli changed (3-platform signed)
-//   - step-06-installer       (0.2.6-test)   : ONLY installer changed (noarch)
-//   - step-07-rollback-faulty (0.2.7-test-faulty) : ONLY faulty signed teamhub (rollbackSafe:false -> auto rollback + denylist)
+//   - step-00-baseline        (0.1.10-v2test.0) : baseline 7 bundles
+//   - step-01-web             (0.1.10-v2test.1) : ONLY web changed (visible V2 badge, 0-downtime hot reload)
+//   - step-02-skills-prompts  (0.1.10-v2test.2) : ONLY skills-prompts changed (0-downtime silent hot reload)
+//   - step-03-node-services   (0.1.10-v2test.3) : ONLY node-services/voice-runtime changed (partial restart + drain)
+//   - step-04-teamhub         (0.1.10-v2test.4) : ONLY teamhub Go binaries changed (3-platform signed)
+//   - step-05-computer-daemon (0.1.10-v2test.5) : ONLY computer-daemon + teamhub-cli changed (3-platform signed)
+//   - step-06-installer       (0.1.10-v2test.6) : ONLY installer changed (noarch)
+//   - step-07-rollback-faulty (0.1.10-v2test.7) : ONLY faulty signed teamhub (rollbackSafe:false -> auto rollback + denylist)
 //
 // Every step's Schema 3 `app-manifest.json` strictly inherits all 6 unchanged
 // modules' exact `artifactId`, `sha256`, `inputHash`, `originAppVersion`, and
@@ -34,19 +34,17 @@ const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.resolve(scriptsDir, "..");
 const defaultRepoRoot = path.resolve(desktopDir, "../..");
 
-export function deriveStepVersions(baseVersion = "0.2.0-test.0") {
-  const match = /^(\d+)\.(\d+)\.(\d+)(?:-([A-Za-z0-9-]+)(?:\.[A-Za-z0-9.-]+)?)?$/.exec(
+export function deriveStepVersions(baseVersion = "0.1.10-v2test.0") {
+  const match = /^(\d+\.\d+\.\d+)(?:-([A-Za-z0-9-]+)(?:\.(\d+))?)?$/.exec(
     baseVersion,
   );
   if (!match) {
     throw new Error(`Invalid baseVersion: ${baseVersion}`);
   }
-  const major = Number(match[1]);
-  const minor = Number(match[2]);
-  const basePatch = Number(match[3]);
-  const preTag = match[4] || "test";
-  const v = (offset, extra = "") =>
-    `${major}.${minor}.${basePatch + offset}-${preTag}${extra}`;
+  const core = match[1];
+  const preTag = match[2] || "v2test";
+  const startNum = match[3] !== undefined ? Number(match[3]) : 0;
+  const v = (offset) => `${core}-${preTag}.${startNum + offset}`;
   return {
     "step-00-baseline": baseVersion,
     "step-01-web": v(1),
@@ -55,7 +53,7 @@ export function deriveStepVersions(baseVersion = "0.2.0-test.0") {
     "step-04-teamhub": v(4),
     "step-05-computer-daemon": v(5),
     "step-06-installer": v(6),
-    "step-07-rollback-faulty": v(7, "-faulty"),
+    "step-07-rollback-faulty": v(7),
   };
 }
 
@@ -428,7 +426,7 @@ LINGER_BUNDLE_CHECK_INTERVAL_MS=10000 \\
 export async function buildV2TestUpgradePacks({
   repoRoot = defaultRepoRoot,
   outDir,
-  baseVersion = "0.2.0-test.0",
+  baseVersion = "0.1.10-v2test.0",
   channel = "stable",
   baseUrl = "relative",
   targets = [...PLATFORM_TARGETS],
@@ -478,7 +476,9 @@ export async function buildV2TestUpgradePacks({
   const lockfilePath = path.join(repoRoot, "pnpm-lock.yaml");
   const lockfileText = existsSync(lockfilePath) ? await readFile(lockfilePath, "utf8") : "";
   const nativeDepsInfo = computeNativeDepsHash(lockfileText, { target: "all", nodeMajor: "26" });
-  const effectiveMinShell = minShellVersion ?? baseVersion.split("-")[0];
+  // Keep minShellVersion <= baseVersion (never strip prerelease suffix, since in
+  // SemVer 0.1.10-v2test.0 < 0.1.10 which would wrongly trigger shell-upgrade-required).
+  const effectiveMinShell = minShellVersion ?? baseVersion;
   const staticHostSrc = path.join(repoRoot, "apps/web/static-host.mjs");
 
   const work = await mkdtemp(path.join(tmpdir(), "linger-v2-test-kit-"));
@@ -1000,7 +1000,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const outDir = path.resolve(
     flag("--out") ?? path.join(repoRoot, ".linger-runtime/v2-test-service-upgrade-packs"),
   );
-  const baseVersion = flag("--base-version") ?? "0.2.0-test.0";
+  const baseVersion = flag("--base-version") ?? "0.1.10-v2test.0";
   const channel = flag("--channel") ?? "stable";
   const baseUrl = flag("--base-url") || "relative";
   const targets = (flag("--targets") ?? PLATFORM_TARGETS.join(","))
