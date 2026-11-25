@@ -359,6 +359,10 @@ describe("BYOK localmodels integration", () => {
       stderr: string;
     }) => void;
     let rejectApply!: (error: Error) => void;
+    let mounting!: () => void;
+    const mounted = new Promise<void>((resolve) => {
+      mounting = resolve;
+    });
     const promise = prepareByokRuntime(
       {
         baseUrl: "https://api.example.com",
@@ -383,9 +387,13 @@ describe("BYOK localmodels integration", () => {
           new Promise((resolve, reject) => {
             resolveApply = resolve;
             rejectApply = reject;
+            mounting();
           }),
       },
     );
+    // The mount starts after real file reads, which fake timers do not
+    // advance; time moves only once it is waiting.
+    await mounted;
     await vi.advanceTimersByTimeAsync(9_900);
     const beforeTen = events.length;
     await vi.advanceTimersByTimeAsync(200);
