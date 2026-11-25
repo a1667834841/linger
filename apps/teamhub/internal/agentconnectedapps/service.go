@@ -239,7 +239,7 @@ func (s *Service) Search(ctx context.Context, token string, input SearchInput) (
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	authorization, err := s.contexts.AuthorizeInTx(ctx, tx, token, "search_app_tools")
+	authorization, err := s.contexts.AuthorizeInTx(agentauth.WithCustomConnector(ctx), tx, token, "search_app_tools")
 	if err != nil {
 		return nil, err
 	}
@@ -251,6 +251,9 @@ func (s *Service) Search(ctx context.Context, token string, input SearchInput) (
 		return nil, err
 	}
 	if len(connections) == 0 {
+		if !s.contexts.ConnectedAppsConfigured() && input.AppKey != externalsource.CustomMCPAppKey && input.ConnectionID == "" {
+			return nil, agentauth.ErrProviderKeyRequired
+		}
 		return nil, &Error{Code: "app_not_connected", Message: "No active delegated connected app matches this search"}
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -259,6 +262,13 @@ func (s *Service) Search(ctx context.Context, token string, input SearchInput) (
 
 	activeConnections := make([]externalsource.AgentToolConnection, 0, len(connections))
 	for _, connection := range connections {
+		if connection.AppKey == externalsource.CustomMCPAppKey {
+			activeConnections = append(activeConnections, connection)
+			continue
+		}
+		if !s.contexts.ConnectedAppsConfigured() {
+			continue
+		}
 		status, statusErr := s.provider.GetConnectionStatusForToolkit(ctx, connection.UpstreamConnectionID, connection.ToolkitSlug)
 		if statusErr != nil {
 			return nil, mapToolError(&providerOperationError{phase: "connection_status", err: statusErr}, "search")
@@ -268,6 +278,9 @@ func (s *Service) Search(ctx context.Context, token string, input SearchInput) (
 		}
 	}
 	if len(activeConnections) == 0 {
+		if !s.contexts.ConnectedAppsConfigured() {
+			return nil, agentauth.ErrProviderKeyRequired
+		}
 		return nil, &Error{Code: "app_not_connected", Message: "No active delegated connected app matches this search"}
 	}
 	return s.searchTools(ctx, activeConnections, input.Query, input.Limit)
@@ -286,6 +299,9 @@ func (s *Service) Execute(ctx context.Context, token string, input ExecuteInput)
 	if s == nil || s.pool == nil || s.contexts == nil || s.connections == nil || s.provider == nil {
 		return Result{}, unavailableError(nil)
 	}
+	if strings.HasPrefix(input.ToolSlug, "MCP_") {
+		ctx = agentauth.WithCustomConnector(ctx)
+	}
 	return s.execute(ctx, input, func(ctx context.Context) (externalsource.AgentToolConnection, error) {
 		return s.authorizeExecution(ctx, token, input.ConnectionID)
 	})
@@ -301,6 +317,11 @@ func (s *Service) execute(ctx context.Context, input ExecuteInput, authorize fun
 	defer func() {
 		s.logCall(ctx, "tools/execute", connection, input.ToolSlug, input.ToolVersion, resultOutcome(result, err), issueCodes(err)...)
 	}()
+	if connection.AppKey == externalsource.CustomMCPAppKey {
+		return s.prepareCustomMCP(ctx, connection, confirmationAction{
+			ToolSlug: input.ToolSlug, ToolVersion: input.ToolVersion, Arguments: input.Arguments,
+		})
+	}
 	if err := s.checkConnectionActive(ctx, connection); err != nil {
 		return Result{}, err
 	}
@@ -416,6 +437,9 @@ func (s *Service) authorizeExecution(ctx context.Context, token string, connecti
 	if err != nil {
 		return externalsource.AgentToolConnection{}, mapToolError(err, "execute")
 	}
+	if connection.AppKey != externalsource.CustomMCPAppKey && !s.contexts.ConnectedAppsConfigured() {
+		return externalsource.AgentToolConnection{}, agentauth.ErrProviderKeyRequired
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return externalsource.AgentToolConnection{}, err
 	}
@@ -436,6 +460,18 @@ func (s *Service) searchTools(ctx context.Context, connections []externalsource.
 	sort.Strings(apps)
 	candidates := make(map[string][]AppTool, len(apps))
 	for _, app := range apps {
+		if app == externalsource.CustomMCPAppKey {
+			for _, connection := range byApp[app] {
+				if remaining := limit - len(candidates[app]); remaining > 0 {
+					found, err := s.searchCustomMCPTools(ctx, connection, query, remaining)
+					if err != nil {
+						return nil, mapToolError(err, "search")
+					}
+					candidates[app] = append(candidates[app], found...)
+				}
+			}
+			continue
+		}
 		connection := byApp[app][0]
 		toolkit := connection.ToolkitSlug
 		searchLimit := limit
