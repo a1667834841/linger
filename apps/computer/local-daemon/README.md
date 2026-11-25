@@ -54,12 +54,17 @@ distributions record both from the kit's release (`runtimeVersions`,
 `runtimeBaselines`), and a Go test fails when either is below a minimum. Raise a minimum only
 after a kit that installs a release at or above it ships in the desktop
 distribution pins (`apps/desktop/distribution/*.json`).
-The Codex canary workflow (`.github/workflows/codex-canary.yml`) runs the native
-Codex compatibility tests daily against npm's newest stable Codex, because a
-user's own newer Codex reaches the Daemon before any kit locks it. The
-localmodels kit opens a lock update merge request for each new stable Codex at
-least seven days old; it should merge only after the canary passes on that
-version.
+The canary workflows run the native compatibility tests daily, because a
+user's own newer CLI reaches the Daemon before any kit locks it:
+`.github/workflows/codex-canary.yml` against npm's newest stable Codex, and
+`.github/workflows/claude-canary.yml` against the newest Claude Code on
+Anthropic's stable channel. The required `check (computer-go)` runs the same tests
+against the Codex and Claude Code the pinned kit installs (`runtimeVersions`
+in `apps/desktop/distribution/linux-x64.json`), so a Daemon change or a kit
+pin that breaks the managed Runtimes cannot land. The
+localmodels kit opens a lock update merge request for each new stable Codex
+or Claude Code at least seven days old; it should merge only after that
+Runtime's canary passes on that version.
 It performs bounded protocol and authentication probes.
 A protocol probe passes once the Runtime answers the handshake, however the
 process exits after its input closes. When the handshake fails, the daemon log
@@ -211,8 +216,11 @@ downloaded model that Run's Agent names.
   (Pi catalog below), and waits until that model is loaded. A model no row of the last readable snapshot
   names (a BYOK or setup-stack model) costs no tool call and no wait; once
   the installer lock wait below has ended, neither does a model that
-  snapshot shows loaded. Otherwise the Daemon reads the status once. A downloaded model that is `idle` or `failed` is loaded with
-  `library load <model>` and never `--unload`, so the Daemon does not evict
+  snapshot shows loaded while its loopback engine `/health` (and saved local
+  loopback gateway `/health`, when configured) still answers. Otherwise the Daemon reads the status once; a refreshed `loaded` row is trusted unless the saved local gateway does not answer. A downloaded model that is `idle` or `failed` is loaded with
+  `library load <model>` (resetting a `HEALTH_CHECK_FAILED` row or a dead-gateway
+  `loaded` row with `library unload <model>` first, as `Act` also does for
+  owner-initiated loads) and never `--unload`, so the Daemon does not evict
   a model to make room: a load that does not fit is refused, and the Run
   fails with `local_model_unavailable` when the Agent Service's welcome names
   that service feature, else with `model_unavailable` for an older service;
@@ -585,15 +593,20 @@ the current SID and ACL, not POSIX permission bits. Writing a separate credentia
 does not change the permissions of an existing parent directory.
 
 The installer and the Daemon refuse a private path when another account can
-replace one of its parent directories. One exception applies: the Codex Windows
-sandbox may hold that right on a parent, such as AppData. The sandbox acts
+replace one of its parent directories, naming the offending ancestor path and
+SID. Ancestors trust the current user, `SYSTEM`, `BUILTIN\Administrators`,
+`TrustedInstaller`, built-in Administrator/Domain/Enterprise Admin SIDs
+(`S-1-5-21-*-*-*-500|512|519`), and direct individual/domain/Entra members of
+local `BUILTIN\Administrators` (excluding broad well-known groups). One
+additional exception applies on ancestor access rules: the Codex Windows
+sandbox may hold replace rights on a parent, such as AppData. The sandbox acts
 through the `CodexSandboxUsers` group and the capability SIDs in
-`%USERPROFILE%\.codex\cap_sid`. A sandboxed Codex command can therefore replace
-such a parent; Linger accepts this so it installs beside Codex. Private paths
-themselves still grant access only to the current user and SYSTEM. Their
-owner is the current user or, when that user is an administrator,
-Administrators, which owns what an elevated process (Run as administrator,
-the built-in Administrator) creates.
+`%USERPROFILE%\.codex\cap_sid` (or `%CODEX_HOME%\cap_sid`). A sandboxed Codex
+command can therefore replace such a parent; Linger accepts this so it installs
+beside Codex. Private paths themselves still grant access only to the current
+user and SYSTEM. Their owner is the current user or, when that user is an
+administrator, Administrators, which owns what an elevated process (Run as
+administrator, the built-in Administrator) creates.
 
 Process recovery uses the creation time and a held process handle, so a reused
 process ID is never mistaken for the original. Ordinary tasks are held by a Job
@@ -1097,14 +1110,22 @@ with its dependencies resolves its own jiti first. Node reads `NODE_PATH` at
 startup, so the extension then restores the value Pi inherited, and the
 commands Pi starts never resolve a package from the bundle.
 
-The same extension carries Pi's permission review, so the Daemon loads it for a
-Run with permission review even without MCP servers. Its `tool_call` hook opens
-an RPC `input` dialog titled `linger.permission_review` for each `bash` and
-`mcp__*` call, with the call as JSON. The Daemon answers it with a JSON verdict
-from the Run's permission review, with `bash` reviewed as a shell command. A
-Run without review gets an allow verdict, because a resident Pi process may
-serve both kinds of Run. A missing or unreadable verdict blocks the call. The
-Daemon cancels any other extension dialog.
+The same extension carries Pi's permission review and dynamic MCP attachment, so
+resident Pi processes and provider pre-starts load it with an empty managed MCP
+config file and `mcp__*` in `--tools`. On Room-presence `provider.prepare`, Pi
+starts with a 40-second timeout, verifies `get_state` and applies any clamped
+thinking level, then parks without submitting a prompt. When a Run adopts a
+parked Pi process whose MCP server set changed, the Daemon writes the new
+front-rewritten `linger-mcp.json`, verifies `get_commands` exposes
+`linger-sync-mcp`, runs `/linger-sync-mcp` and reads the structured verdict from
+its `linger.mcp_sync` RPC dialog before submitting the prompt; an attachment
+failure recycles the process and falls back to a cold spawn. Its `tool_call`
+hook opens an RPC `input` dialog titled `linger.permission_review` for each
+`bash` and `mcp__*` call, with the call as JSON. The Daemon answers it with a
+JSON verdict from the Run's permission review, with `bash` reviewed as a shell
+command. A Run without review gets an allow verdict, because a resident Pi
+process may serve both kinds of Run. A missing or unreadable verdict blocks the
+call. The Daemon cancels any other extension dialog.
 
 The compatibility probe of the pinned Playwright catalog is
 `TestPinnedPlaywrightCatalog`; it needs `LINGER_PLAYWRIGHT_COMPAT_ENTRY` and
