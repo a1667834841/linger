@@ -35,15 +35,18 @@ const desktopDir = path.resolve(scriptsDir, "..");
 const defaultRepoRoot = path.resolve(desktopDir, "../..");
 
 export function deriveStepVersions(baseVersion = "0.2.0-test.0") {
-  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(baseVersion);
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:-([A-Za-z0-9-]+)(?:\.[A-Za-z0-9.-]+)?)?$/.exec(
+    baseVersion,
+  );
   if (!match) {
     throw new Error(`Invalid baseVersion: ${baseVersion}`);
   }
   const major = Number(match[1]);
   const minor = Number(match[2]);
   const basePatch = Number(match[3]);
-  const v = (offset, suffix = "-test") =>
-    `${major}.${minor}.${basePatch + offset}${suffix}`;
+  const preTag = match[4] || "test";
+  const v = (offset, extra = "") =>
+    `${major}.${minor}.${basePatch + offset}-${preTag}${extra}`;
   return {
     "step-00-baseline": baseVersion,
     "step-01-web": v(1),
@@ -52,7 +55,7 @@ export function deriveStepVersions(baseVersion = "0.2.0-test.0") {
     "step-04-teamhub": v(4),
     "step-05-computer-daemon": v(5),
     "step-06-installer": v(6),
-    "step-07-rollback-faulty": v(7, "-test-faulty"),
+    "step-07-rollback-faulty": v(7, "-faulty"),
   };
 }
 

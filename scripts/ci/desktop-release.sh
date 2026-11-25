@@ -118,7 +118,7 @@ cmd_version() {
   else
     version="${input#desktop-v}"
   fi
-  if [[ "$version" == "$input" && "$input" == *-v* ]]; then
+  if [[ "$version" == "$input" && "$input" =~ ^[A-Za-z][A-Za-z0-9._-]*-v ]]; then
     die "$input is not a desktop/shell tag; use desktop-v<version> or shell-v<version>"
   fi
   [[ "$version" =~ $version_pattern ]] || die "$input does not hold a version like 0.16.36 or 0.16.36-rc.1"

@@ -14,7 +14,7 @@ import { BundleStoreModule } from "./bundle-store.js";
 import { BundleUpdaterModule } from "./bundle-updater.js";
 import { ConfigStore } from "./config.js";
 import { EventBus, ModuleHost } from "./modules.js";
-import { resolveArtifactUrl } from "./update-manifest.js";
+import { compareVersions, resolveArtifactUrl } from "./update-manifest.js";
 
 const tempDirs: string[] = [];
 
@@ -36,12 +36,24 @@ afterEach(async () => {
 const noopLog = { info: () => {}, warn: () => {}, error: () => {} };
 
 describe("V2 signed test upgrade packs & portable feed server", () => {
-  it("derives deterministic step versions from baseVersion", () => {
+  it("derives deterministic SemVer-monotonic step versions from both -test and -v2test baseVersions", () => {
     const versions = deriveStepVersions("0.2.0-test.0");
     expect(versions["step-00-baseline"]).toBe("0.2.0-test.0");
     expect(versions["step-01-web"]).toBe("0.2.1-test");
     expect(versions["step-06-installer"]).toBe("0.2.6-test");
     expect(versions["step-07-rollback-faulty"]).toBe("0.2.7-test-faulty");
+
+    const v2test = deriveStepVersions("0.2.0-v2test.0");
+    expect(v2test["step-00-baseline"]).toBe("0.2.0-v2test.0");
+    expect(v2test["step-01-web"]).toBe("0.2.1-v2test");
+    expect(v2test["step-04-teamhub"]).toBe("0.2.4-v2test");
+    expect(v2test["step-06-installer"]).toBe("0.2.6-v2test");
+    expect(v2test["step-07-rollback-faulty"]).toBe("0.2.7-v2test-faulty");
+
+    const ordered = Object.values(v2test);
+    for (let i = 1; i < ordered.length; i += 1) {
+      expect(compareVersions(ordered[i]!, ordered[i - 1]!)).toBeGreaterThan(0);
+    }
   });
 
   it("resolves portable relative bundle paths against any feed URL while keeping https URLs intact", () => {

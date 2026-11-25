@@ -6,7 +6,8 @@ name: V2 Signed Test Pack (Non-Release Artifacts)
 # local test feed server (`serve-test-feed.mjs`) for real-device E2E testing.
 #
 # SAFETY GUARANTEE:
-#   - Triggered ONLY by manual `workflow_dispatch` (never on tag/push/PR).
+#   - Triggered ONLY by manual `workflow_dispatch` or `workflow_call` from
+#     desktop-release.yml's non-release `-v2test` bridge (never on tag/push/PR).
 #   - `contents: read` ONLY — NEVER creates/updates any GitHub Release, NEVER
 #     pushes any Git tag, and NEVER touches production CDN or update channels.
 #   - All outputs are uploaded solely as GitHub Actions Artifacts for manual
@@ -16,10 +17,10 @@ on:
   workflow_dispatch:
     inputs:
       base_version:
-        description: Baseline test version (e.g. 0.2.0-test.0; steps 01-07 derive 0.2.1-test..0.2.7-test-faulty)
+        description: Baseline test version (e.g. 0.2.0-v2test.0; steps 01-07 derive 0.2.1-v2test..0.2.7-v2test-faulty)
         type: string
         required: true
-        default: "0.2.0-test.0"
+        default: "0.2.0-v2test.0"
       feed_base_url:
         description: Optional fixed HTTPS feed URL; leave empty (recommended) for portable feed-relative signed manifests that work on any localhost/LAN/tunnel URL
         type: string
@@ -32,6 +33,28 @@ on:
       run_windows_smoke:
         description: Run Windows Setup smoke test on windows-2022 after building the signed installer
         type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      base_version:
+        description: Baseline test version (e.g. 0.2.0-v2test.0)
+        type: string
+        required: false
+        default: "0.2.0-v2test.0"
+      feed_base_url:
+        description: Optional fixed HTTPS feed URL; leave empty for portable feed-relative signed manifests
+        type: string
+        required: false
+        default: ""
+      require_macos_signing:
+        description: Fail fast if macOS Developer ID / Notary secrets are missing
+        type: boolean
+        required: false
+        default: true
+      run_windows_smoke:
+        description: Run Windows Setup smoke test on windows-2022 after building the signed installer
+        type: boolean
+        required: false
         default: true
 
 permissions:
