@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	idgen "github.com/simplexai-labs/linger/apps/teamhub/internal/ids"
@@ -107,10 +108,15 @@ func (s *Service) Pair(ctx context.Context, request mobilegateway.PairRequest) (
 		ID: idgen.New("phone"), AccountID: invite.AccountID, PublicKey: request.PublicKey,
 		Name: name, Platform: request.Platform, ConfirmationCode: code,
 	})
-	if err != nil {
-		// The key already belongs to a phone. A phone uses one key per
-		// pairing, so this is a retry that must resume instead.
+	var postgresError *pgconn.PgError
+	if errors.As(err, &postgresError) && postgresError.Code == "23505" &&
+		postgresError.ConstraintName == "paired_phones_public_key_key" {
+		// The key already belongs to a phone: a phone pairs with a fresh
+		// key, so pairing again with a known one is a bad request.
 		return mobilegateway.Phone{}, mobilegateway.ErrBadPairRequest
+	}
+	if err != nil {
+		return mobilegateway.Phone{}, fmt.Errorf("record pending phone: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return mobilegateway.Phone{}, fmt.Errorf("commit pairing: %w", err)

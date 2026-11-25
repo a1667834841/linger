@@ -34,6 +34,13 @@ func newPipe() (*pipeWire, *pipeWire) {
 }
 
 func (p *pipeWire) Read(ctx context.Context) ([]byte, error) {
+	// A real WebSocket delivers queued messages before its close frame, so a
+	// message already sent wins over a close that follows it.
+	select {
+	case m := <-p.in:
+		return m, nil
+	default:
+	}
 	select {
 	case m := <-p.in:
 		return m, nil
