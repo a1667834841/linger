@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -30,8 +31,16 @@ var (
 )
 
 // errNoManagedBrowser fails a browser call before anything ran: the
-// Computer has no browser the Agent profile can run in.
-var errNoManagedBrowser = errors.New("BROWSER_UNAVAILABLE: install Google Chrome, Chromium or Microsoft Edge to use the managed browser")
+// Computer has no browser the Agent profile can run in. It names only the
+// browsers BrowserCandidates looks for on this platform.
+var errNoManagedBrowser = errors.New("BROWSER_UNAVAILABLE: install " + managedBrowserChoices(runtime.GOOS) + " to use the managed browser")
+
+func managedBrowserChoices(goos string) string {
+	if goos == "linux" {
+		return "Google Chrome or Chromium"
+	}
+	return "Google Chrome or Microsoft Edge"
+}
 
 type nativeBrowser struct {
 	endpoint          string

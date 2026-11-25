@@ -59,7 +59,7 @@ func BrowserConnectionDetail(code string) (string, bool) {
 	case "browser_connection_invalid":
 		return "Nothing was done: the saved connection to the user's Chrome no longer works. Tell them so in one sentence and that they can reconnect it in Settings under Computers. " + browserConnectionSteps + " Until then offer to do it as a background task with start_task (surface web). Never call this tool again in this call until they say it is reconnected.", true
 	case "browser_unavailable":
-		return "Nothing was done: this computer has neither Google Chrome nor Microsoft Edge, so there is no browser you can drive on it. Tell the user so in one sentence and that installing Google Chrome on it fixes this. A background task uses the same browser, so do not offer start_task for this. Never call this tool again in this call until they say it is installed.", true
+		return "Nothing was done: this computer has no browser you can drive. Tell the user so in one sentence and that installing Google Chrome on it fixes this. A background task uses the same browser, so do not offer start_task for this. Never call this tool again in this call until they say it is installed.", true
 	case "browser_busy":
 		return "Nothing was done: a background task is using the user's Chrome right now. Tell them so in one sentence and offer to try again when that task finishes; do not call this tool again right away.", true
 	}

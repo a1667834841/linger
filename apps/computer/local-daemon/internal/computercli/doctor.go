@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/localtools"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
 )
 
@@ -233,32 +234,24 @@ func inspectBrowserMode(homeDirectory string, environment map[string]string, goo
 	check := func(status, detail string) doctorCheck {
 		return doctorCheck{Name: "browser", Category: categoryConfiguration, Status: status, Detail: detail}
 	}
-	var executables, edgeExecutables []string
 	userData := ""
 	switch goos {
 	case "darwin":
-		executables = []string{
-			"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-			filepath.Join(homeDirectory, "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
-		}
-		edgeExecutables = []string{
-			"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-			filepath.Join(homeDirectory, "Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
-		}
 		userData = filepath.Join(homeDirectory, "Library", "Application Support", "Google", "Chrome")
 	case "windows":
-		for _, name := range []string{"LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432"} {
-			if base := environmentValue(environment, name); base != "" {
-				executables = append(executables, filepath.Join(base, "Google", "Chrome", "Application", "chrome.exe"))
-				edgeExecutables = append(edgeExecutables, filepath.Join(base, "Microsoft", "Edge", "Application", "msedge.exe"))
-			}
-		}
 		if local := environmentValue(environment, "LOCALAPPDATA"); local != "" {
 			userData = filepath.Join(local, "Google", "Chrome", "User Data")
 		}
 	default:
 		return check("pass", "Browser tools use the Chrome inside each Agent desktop on this Computer")
 	}
+	env := []string{"HOME=" + homeDirectory}
+	for name, value := range environment {
+		if !strings.EqualFold(name, "HOME") {
+			env = append(env, name+"="+value)
+		}
+	}
+	executables, edgeExecutables := localtools.BrowserCandidates(goos, env)
 	if !anyFile(executables) {
 		if anyFile(edgeExecutables) {
 			return check("pass", "Google Chrome is not installed; Agents use a dedicated Microsoft Edge profile without your sign-ins. Install Google Chrome to connect your everyday browser")
