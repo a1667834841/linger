@@ -17,10 +17,15 @@ export declare function packDeterministicTarZst(
   suffix?: string,
 ): Promise<PackedTarZst>;
 
-export declare function packageSkillsPromptsBundle(
-  repoRoot: string,
-  outDir: string,
-): Promise<PackedTarZst>;
+export declare function packageBackendBundle(options: {
+  target: string;
+  outDir: string;
+  teamhubDir?: string | null;
+  nodeServicesDir?: string | null;
+  skillsDir?: string | null;
+  computerDaemonDir?: string | null;
+  installerDir?: string | null;
+}): Promise<PackedTarZst>;
 
 export declare function assembleManifestV3(options: {
   appVersion: string;

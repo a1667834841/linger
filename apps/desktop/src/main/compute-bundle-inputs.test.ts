@@ -116,7 +116,7 @@ describe("V2 bundle versioning & inputHash planner", () => {
       baseUrl: "https://cdn.example.com/linger",
     });
 
-    // 1. Edit ONLY apps/web/src/App.tsx -> only `web` should rebuild!
+    // 1. Edit ONLY apps/web/src/App.tsx -> only `web` should rebuild (backend + node-native-deps reused)!
     await writeFile(
       path.join(repo, "apps/web/src/App.tsx"),
       "export const App = () => 'v2';\n",
@@ -126,14 +126,23 @@ describe("V2 bundle versioning & inputHash planner", () => {
       prevManifest,
     });
     expect(webOnlyPlan.toBuild).toEqual(["web"]);
-    expect(webOnlyPlan.reused).toContain("node-services");
-    expect(webOnlyPlan.reused).toContain("node-native-deps");
-    expect(webOnlyPlan.reused).toContain("teamhub");
-    expect(webOnlyPlan.reused).toContain("computer-daemon");
-    expect(webOnlyPlan.reused).toContain("skills-prompts");
+    expect(webOnlyPlan.reused).toEqual(["backend", "node-native-deps"]);
 
-    // 2. Edit ONLY packages/service-kit -> triggers web, node-services, computer-daemon, installer, NOT node-native-deps or teamhub!
-    const baselineKitHash = computeBundleInputHash(repo, "node-native-deps", {
+    // 2. Edit ONLY apps/teamhub/cmd/teamhub/main.go -> only `backend` rebuilds (`web` and `node-native-deps` reused!)
+    await writeFile(
+      path.join(repo, "apps/web/src/App.tsx"),
+      "export const App = () => 'v1';\n",
+    );
+    await writeFile(
+      path.join(repo, "apps/teamhub/cmd/teamhub/main.go"),
+      "package main\nfunc main() { println(2) }\n",
+    );
+    const backendOnlyPlan = planBundleBuilds(repo, { useFs: true, prevManifest });
+    expect(backendOnlyPlan.toBuild).toEqual(["backend"]);
+    expect(backendOnlyPlan.reused).toEqual(["web", "node-native-deps"]);
+
+    // 3. Edit ONLY packages/service-kit -> triggers `web` + `backend`, NEVER `node-native-deps`!
+    const baselineDepsHash = computeBundleInputHash(repo, "node-native-deps", {
       useFs: true,
     }).inputHash;
     await writeFile(
@@ -141,20 +150,11 @@ describe("V2 bundle versioning & inputHash planner", () => {
       "export const kit = 2;\n",
     );
     const kitPlan = planBundleBuilds(repo, { useFs: true, prevManifest });
-    expect(kitPlan.toBuild).toEqual(
-      expect.arrayContaining([
-        "web",
-        "node-services",
-        "computer-daemon",
-        "installer",
-      ]),
-    );
-    expect(kitPlan.reused).toContain("node-native-deps");
-    expect(kitPlan.reused).toContain("teamhub");
-    expect(kitPlan.reused).toContain("skills-prompts");
+    expect(kitPlan.toBuild).toEqual(["web", "backend"]);
+    expect(kitPlan.reused).toEqual(["node-native-deps"]);
     expect(
       computeBundleInputHash(repo, "node-native-deps", { useFs: true }).inputHash,
-    ).toBe(baselineKitHash);
+    ).toBe(baselineDepsHash);
   });
 
   it("packs deterministic .tar.zst bundles and assembles + Ed25519-signs Schema 3 manifest with inherited URLs", async () => {

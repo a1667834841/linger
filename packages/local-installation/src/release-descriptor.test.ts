@@ -90,11 +90,7 @@ describe("V2 local-installation release descriptors & decoupled bundles", () => 
       },
       modules: {
         web: mk("web"),
-        "node-services": mk("node-services"),
-        teamhub: mk("teamhub"),
-        "computer-daemon": mk("computer-daemon"),
-        installer: mk("installer"),
-        "skills-prompts": mk("skills-prompts"),
+        backend: mk("backend"),
       },
     };
 
@@ -113,7 +109,7 @@ describe("V2 local-installation release descriptors & decoupled bundles", () => 
 
     const nodeEnv = resolveBundleRuntimeEnv({
       nodeDepsDir: path.join(home, "infra/node-deps/nd-aaaaaaaaaaaaaaaa"),
-      promptsDir: path.join(home, "store/skills-prompts/skills-prompts-111111111111/prompts"),
+      promptsDir: path.join(home, "store/backend/backend-111111111111/node-services/prompts"),
     });
     expect(nodeEnv.NODE_PATH).toContain("nd-aaaaaaaaaaaaaaaa");
     expect(nodeEnv.LINGER_PROMPTS_DIR).toContain("prompts");
@@ -132,8 +128,20 @@ describe("V2 local-installation release descriptors & decoupled bundles", () => 
       platform: "win32",
     });
     expect(thCmd.command).toBe(
-      path.join(home, "store/teamhub/teamhub-111111111111/teamhub.exe"),
+      path.join(home, "store/backend/backend-111111111111/teamhub/teamhub.exe"),
     );
-    expect(thCmd.env.TEAMHUB_SKILLS_DIR).toContain("skills");
+    expect(thCmd.env.TEAMHUB_SKILLS_DIR).toBe(
+      path.join(home, "store/backend/backend-111111111111/skills"),
+    );
+
+    const nsCmd = planBundleNativeCommand("node-services", home, descriptor, {
+      platform: "darwin",
+    });
+    expect(nsCmd.args[1]).toBe(
+      path.join(home, "store/backend/backend-111111111111/node-services/dist/supervisor.js"),
+    );
+    expect(nsCmd.env.LINGER_PROMPTS_DIR).toBe(
+      path.join(home, "store/backend/backend-111111111111/node-services/prompts"),
+    );
   });
 });

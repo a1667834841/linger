@@ -327,14 +327,7 @@ export class BundleStoreModule implements Module {
   async importSeed(seedDir: string): Promise<LocalReleaseDescriptor> {
     const manifestPath = path.join(seedDir, "seed-manifest.json");
     const seed = JSON.parse(await readFile(manifestPath, "utf8")) as SeedManifest;
-    const moduleIds: readonly BundleModuleId[] = [
-      "web",
-      "node-services",
-      "teamhub",
-      "computer-daemon",
-      "installer",
-      "skills-prompts",
-    ];
+    const moduleIds: readonly BundleModuleId[] = ["web", "backend"];
 
     const nodeDepsEntry = seed.bundles["node-native-deps"];
     const nodeDepsShortId = path.basename(seed.infra.nodeDeps);

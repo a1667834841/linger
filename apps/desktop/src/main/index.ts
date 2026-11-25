@@ -406,7 +406,8 @@ async function main(): Promise<void> {
     await stopManagedTeamhub();
     const exe = (name: string) =>
       process.platform === "win32" ? `${name}.exe` : name;
-    const teamhubDir = path.join(home, release.modules.teamhub.path);
+    const backendDir = path.join(home, release.modules.backend.path);
+    const teamhubDir = path.join(backendDir, "teamhub");
     const migrateExe = path.join(teamhubDir, exe("migrate"));
     const teamhubExe = path.join(teamhubDir, exe("teamhub"));
     if (existsSync(migrateExe) && process.env.TEAMHUB_DATABASE_URL) {
@@ -422,7 +423,11 @@ async function main(): Promise<void> {
     });
     const child = spawn(teamhubExe, [], {
       cwd: teamhubDir,
-      env: { ...process.env, GIN_MODE: "release" },
+      env: {
+        ...process.env,
+        GIN_MODE: "release",
+        TEAMHUB_SKILLS_DIR: path.join(backendDir, "skills"),
+      },
       stdio: ["ignore", "pipe", "pipe"],
     });
     child.stdout?.pipe(logStream);
@@ -434,7 +439,7 @@ async function main(): Promise<void> {
         JSON.stringify({
           pid: child.pid,
           appVersion: release.appVersion,
-          artifactId: release.modules.teamhub.artifactId,
+          artifactId: release.modules.backend.artifactId,
         }),
         "utf8",
       );
@@ -442,7 +447,7 @@ async function main(): Promise<void> {
     log.info("managed_teamhub.started", {
       pid: child.pid,
       appVersion: release.appVersion,
-      artifactId: release.modules.teamhub.artifactId,
+      artifactId: release.modules.backend.artifactId,
     });
   };
 
@@ -479,7 +484,7 @@ async function main(): Promise<void> {
   ): Promise<void> => {
     if (process.env.LINGER_VOICE_RUNTIME_MANAGED !== "1") return;
     await stopManagedVoiceRuntime();
-    const nsDir = path.join(home, release.modules["node-services"].path);
+    const nsDir = path.join(home, release.modules.backend.path, "node-services");
     const entry = path.join(nsDir, "voice-runtime.mjs");
     if (!existsSync(entry)) {
       throw new Error(`Managed voice-runtime entry missing: ${entry}`);
@@ -496,8 +501,7 @@ async function main(): Promise<void> {
         ...process.env,
         ...(nodeBin === process.execPath ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
         LINGER_APP_VERSION: release.appVersion,
-        LINGER_NODE_SERVICES_ARTIFACT_ID:
-          release.modules["node-services"].artifactId,
+        LINGER_BACKEND_ARTIFACT_ID: release.modules.backend.artifactId,
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -510,7 +514,7 @@ async function main(): Promise<void> {
         JSON.stringify({
           pid: child.pid,
           appVersion: release.appVersion,
-          artifactId: release.modules["node-services"].artifactId,
+          artifactId: release.modules.backend.artifactId,
           port: Number(process.env.LINGER_VOICE_RUNTIME_PORT || 0),
         }),
         "utf8",
@@ -519,7 +523,7 @@ async function main(): Promise<void> {
     log.info("managed_voice_runtime.started", {
       pid: child.pid,
       appVersion: release.appVersion,
-      artifactId: release.modules["node-services"].artifactId,
+      artifactId: release.modules.backend.artifactId,
     });
   };
 
@@ -588,12 +592,6 @@ async function main(): Promise<void> {
           log.info("release_orchestrator.db_restored", { file: relFile });
         }
       : undefined,
-    hotReloadSkills: async (release) => {
-      log.info("release_orchestrator.skills_reloaded", {
-        appVersion: release.appVersion,
-        artifactId: release.modules["skills-prompts"].artifactId,
-      });
-    },
     hotReloadWeb: async (release) => {
       const origin = config.get().serverUrl;
       const token = process.env.LINGER_WEB_CONTROL_TOKEN;
@@ -621,35 +619,37 @@ async function main(): Promise<void> {
       }, 60);
     },
     restartServices: async (release, changed) => {
-      if (changed.includes("teamhub")) {
+      if (changed.includes("backend")) {
         await startManagedTeamhub(release);
-      }
-      if (changed.includes("node-services")) {
         await startManagedVoiceRuntime(release);
-      }
-      if (changed.includes("computer-daemon")) {
-        const daemonDir = path.join(home, release.modules["computer-daemon"].path);
+        const daemonDir = path.join(
+          home,
+          release.modules.backend.path,
+          "computer-daemon",
+        );
         const daemonExe = path.join(
           daemonDir,
           process.platform === "win32"
             ? "linger-computer-daemon.exe"
             : "linger-computer-daemon",
         );
-        const sharedNode = path.join(
-          home,
-          release.infra.node,
-          "bin",
-          process.platform === "win32" ? "node.exe" : "node",
-        );
-        computerDaemon.reloadBinary({
-          spawn: spawnDaemon(
-            daemonExe,
-            path.join(userData, "logs", "computer-daemon.log"),
-          ),
-          teamhubCliDirectory: path.join(daemonDir, "teamhub-cli"),
-          extraEnv: { LINGER_TOOLS_NODE_PATH: sharedNode },
-          whenIdle: false,
-        });
+        if (existsSync(daemonExe)) {
+          const sharedNode = path.join(
+            home,
+            release.infra.node,
+            "bin",
+            process.platform === "win32" ? "node.exe" : "node",
+          );
+          computerDaemon.reloadBinary({
+            spawn: spawnDaemon(
+              daemonExe,
+              path.join(userData, "logs", "computer-daemon.log"),
+            ),
+            teamhubCliDirectory: path.join(daemonDir, "teamhub-cli"),
+            extraEnv: { LINGER_TOOLS_NODE_PATH: sharedNode },
+            whenIdle: false,
+          });
+        }
       }
       log.info("release_orchestrator.services_restarted", {
         appVersion: release.appVersion,
@@ -670,7 +670,7 @@ async function main(): Promise<void> {
           },
         });
       }
-      if (changed.includes("teamhub")) {
+      if (changed.includes("backend")) {
         const teamhubHealth =
           (!app.isPackaged && process.env.LINGER_TEAMHUB_HEALTH_URL) ||
           (origin ? new URL("/healthz", origin).toString() : undefined);
@@ -695,8 +695,6 @@ async function main(): Promise<void> {
             },
           });
         }
-      }
-      if (changed.includes("node-services")) {
         const vrHealth =
           !app.isPackaged && process.env.LINGER_VOICE_RUNTIME_HEALTH_URL;
         if (vrHealth) {

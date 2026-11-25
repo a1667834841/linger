@@ -134,15 +134,11 @@ export function planBundleNativeCommand(
   );
   const nodeDepsDir = resolveSafeHomePath(home, release.infra.nodeDeps);
   const webDir = resolveSafeHomePath(home, release.modules.web.path);
-  const nodeServicesDir = resolveSafeHomePath(
-    home,
-    release.modules["node-services"].path,
-  );
-  const teamhubDir = resolveSafeHomePath(home, release.modules.teamhub.path);
-  const skillsPromptsDir = resolveSafeHomePath(
-    home,
-    release.modules["skills-prompts"].path,
-  );
+  const backendDir = resolveSafeHomePath(home, release.modules.backend.path);
+  const nodeServicesDir = path.join(backendDir, "node-services");
+  const teamhubDir = path.join(backendDir, "teamhub");
+  const skillsDir = path.join(backendDir, "skills");
+  const promptsDir = path.join(nodeServicesDir, "prompts");
 
   switch (operation) {
     case "web":
@@ -169,7 +165,7 @@ export function planBundleNativeCommand(
         cwd: path.resolve(home),
         env: resolveBundleRuntimeEnv({
           nodeDepsDir,
-          promptsDir: path.join(skillsPromptsDir, "prompts"),
+          promptsDir,
           baseEnv: options.baseEnv,
         }),
       };
@@ -180,7 +176,7 @@ export function planBundleNativeCommand(
         cwd: teamhubDir,
         env: {
           GIN_MODE: "release",
-          TEAMHUB_SKILLS_DIR: path.join(skillsPromptsDir, "skills"),
+          TEAMHUB_SKILLS_DIR: skillsDir,
         },
       };
     case "migrate":

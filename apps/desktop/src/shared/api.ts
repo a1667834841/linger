@@ -54,7 +54,7 @@ export type DesktopPermissionStep =
   | { readonly action: "relaunch"; readonly subject: "linger" };
 
 export type UpdateChannel = "stable" | "beta" | "canary";
-export type UpdateScope = "shell" | "app" | "web" | "skills";
+export type UpdateScope = "shell" | "backend" | "web";
 export type UpdateActionKind =
   | "reload-page"
   | "restart-services"

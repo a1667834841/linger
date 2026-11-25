@@ -17,7 +17,7 @@ NATIVE = os.path.join(DESKTOP, "dist", "installer", "native")
 SOURCE = os.path.join(DESKTOP, "dist", "installer", "source")
 SEED = os.path.join(DESKTOP, "dist", "seed")
 TEAMHUB_COMMANDS = ("teamhub", "migrate", "account")
-V2_SEED_MODULES = ("web", "node-services", "node-native-deps", "teamhub", "computer-daemon", "installer", "skills-prompts")
+V2_SEED_MODULES = ("web", "backend", "node-native-deps")
 
 
 def check_seed_manifest(target, seed_dir=SEED):

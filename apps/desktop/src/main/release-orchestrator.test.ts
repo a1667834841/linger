@@ -64,27 +64,17 @@ function makeRelease(
     },
     modules: {
       web: mk("web"),
-      "node-services": mk("node-services"),
-      teamhub: mk("teamhub"),
-      "computer-daemon": mk("computer-daemon"),
-      installer: mk("installer"),
-      "skills-prompts": mk("skills-prompts"),
+      backend: mk("backend"),
     },
   };
 }
 
 describe("ReleaseOrchestratorModule & HealthWatchdogModule", () => {
-  it("classifies web-only and skills-only diffs as zero-downtime without draining", () => {
+  it("classifies web-only diff as zero-downtime hot reload and backend diff as atomic drain restart", () => {
     const v1 = makeRelease("0.2.14");
-    const v2Skills = makeRelease("0.2.15", { "skills-prompts": "2" });
     const v2Web = makeRelease("0.2.15", { web: "2" });
-    const v2Backend = makeRelease("0.2.15", { teamhub: "2" });
+    const v2Backend = makeRelease("0.2.15", { backend: "2" });
 
-    expect(diffReleaseModules(v1, v2Skills)).toMatchObject({
-      scope: "skills",
-      requiresDrain: false,
-      changedModules: ["skills-prompts"],
-    });
     expect(diffReleaseModules(v1, v2Web)).toMatchObject({
       scope: "web",
       action: "reload-page",
@@ -92,10 +82,10 @@ describe("ReleaseOrchestratorModule & HealthWatchdogModule", () => {
       changedModules: ["web"],
     });
     expect(diffReleaseModules(v1, v2Backend)).toMatchObject({
-      scope: "app",
+      scope: "backend",
       action: "restart-services",
       requiresDrain: true,
-      changedModules: ["teamhub"],
+      changedModules: ["backend"],
     });
   });
 
@@ -158,9 +148,9 @@ describe("ReleaseOrchestratorModule & HealthWatchdogModule", () => {
     });
     await store.commitPending();
 
-    // Stage 0.2.15 (non-rollbackSafe teamhub change) while activeOps=1
+    // Stage 0.2.15 (non-rollbackSafe backend change) while activeOps=1
     await store.writeReleaseDescriptor(
-      makeRelease("0.2.15", { teamhub: "2" }, false),
+      makeRelease("0.2.15", { backend: "2" }, false),
     );
     await orch.onBundleStaged("0.2.15");
     expect(orch.state().kind).toBe("ready");
@@ -180,7 +170,7 @@ describe("ReleaseOrchestratorModule & HealthWatchdogModule", () => {
 
     // Stage 0.2.16 (healthy at gate), commit succeeds, then 2 crashes in observation window trigger automatic rollback!
     probeHealthy = true;
-    await store.writeReleaseDescriptor(makeRelease("0.2.16", { "node-services": "3" }));
+    await store.writeReleaseDescriptor(makeRelease("0.2.16", { backend: "3" }));
     await orch.onBundleStaged("0.2.16");
     expect(await orch.applyStaged()).toBe(true);
     expect((await store.readCurrent())?.appVersion).toBe("0.2.16");

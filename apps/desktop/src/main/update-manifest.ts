@@ -85,12 +85,8 @@ export type PlatformTarget = (typeof PLATFORM_TARGETS)[number];
 
 export const BUNDLE_IDS = [
   "web",
-  "node-services",
+  "backend",
   "node-native-deps",
-  "teamhub",
-  "computer-daemon",
-  "installer",
-  "skills-prompts",
 ] as const;
 export type BundleId = (typeof BUNDLE_IDS)[number];
 
@@ -130,6 +126,7 @@ const platformBundleEntry = z.object({
   arch: z.literal("per-target"),
   originAppVersion: z.string().regex(VERSION),
   inputHash: z.string().regex(SHA256),
+  nativeDepsHash: z.string().min(1).optional(),
   targets: z.record(z.string(), artifactRef),
 });
 export type PlatformBundleEntry = z.infer<typeof platformBundleEntry>;
@@ -178,12 +175,8 @@ const appManifestV3 = z.object({
     .optional(),
   bundles: z.object({
     web: noarchBundleEntry,
-    "node-services": noarchBundleEntry,
+    backend: platformBundleEntry,
     "node-native-deps": platformBundleEntry,
-    teamhub: platformBundleEntry,
-    "computer-daemon": platformBundleEntry,
-    installer: noarchBundleEntry,
-    "skills-prompts": noarchBundleEntry,
   }),
 });
 export type AppManifestV3 = z.infer<typeof appManifestV3>;

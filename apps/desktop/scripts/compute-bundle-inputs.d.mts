@@ -1,11 +1,7 @@
 export declare const BUNDLE_IDS: readonly [
   "web",
-  "node-services",
+  "backend",
   "node-native-deps",
-  "teamhub",
-  "computer-daemon",
-  "installer",
-  "skills-prompts",
 ];
 
 export declare const PLATFORM_TARGETS: readonly [

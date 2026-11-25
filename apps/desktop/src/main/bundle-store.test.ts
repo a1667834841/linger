@@ -79,11 +79,7 @@ function makeDescriptor(
     },
     modules: {
       web: mk("web"),
-      "node-services": mk("node-services"),
-      teamhub: mk("teamhub"),
-      "computer-daemon": mk("computer-daemon"),
-      installer: mk("installer"),
-      "skills-prompts": mk("skills-prompts"),
+      backend: mk("backend"),
     },
   };
 }
@@ -171,12 +167,8 @@ describe("BundleStoreModule", () => {
 
     const bundleNames = [
       "web",
-      "node-services",
+      "backend",
       "node-native-deps",
-      "teamhub",
-      "computer-daemon",
-      "installer",
-      "skills-prompts",
     ] as const;
     const bundles: Record<string, unknown> = {};
     for (const name of bundleNames) {

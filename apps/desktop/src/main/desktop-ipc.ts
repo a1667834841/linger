@@ -275,10 +275,13 @@ export class DesktopIpcModule implements Module {
       }
       const bState = bundleUpdater?.state();
       if (bState?.kind === "downloading") {
+        const onlyWeb =
+          bState.changedModules.length > 0 &&
+          bState.changedModules.every((m) => m === "web");
         return {
           kind: "downloading",
           version: bState.version,
-          scope: "app",
+          scope: onlyWeb ? "web" : "backend",
           progress: {
             bytesDownloaded: bState.bytesDownloaded,
             bytesTotal: bState.bytesTotal,

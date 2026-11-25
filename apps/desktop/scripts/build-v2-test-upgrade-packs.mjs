@@ -1,15 +1,11 @@
-// Builds the complete Linger V2 per-service signed upgrade test kit:
-//   - step-00-baseline        (0.1.10-v2test.0) : baseline 7 bundles
-//   - step-01-web             (0.1.10-v2test.1) : ONLY web changed (visible V2 badge, 0-downtime hot reload)
-//   - step-02-skills-prompts  (0.1.10-v2test.2) : ONLY skills-prompts changed (0-downtime silent hot reload)
-//   - step-03-node-services   (0.1.10-v2test.3) : ONLY node-services/voice-runtime changed (partial restart + drain)
-//   - step-04-teamhub         (0.1.10-v2test.4) : ONLY teamhub Go binaries changed (3-platform signed)
-//   - step-05-computer-daemon (0.1.10-v2test.5) : ONLY computer-daemon + teamhub-cli changed (3-platform signed)
-//   - step-06-installer       (0.1.10-v2test.6) : ONLY installer changed (noarch)
-//   - step-07-rollback-faulty (0.1.10-v2test.7) : ONLY faulty signed teamhub (rollbackSafe:false -> auto rollback + denylist)
+// Builds the Linger V2 2+1 signed upgrade test kit (web + unified backend + cached node-native-deps):
+//   - step-00-baseline        (0.1.10-v2test.0) : baseline 2+1 bundles (web + backend + node-native-deps)
+//   - step-01-web             (0.1.10-v2test.1) : ONLY web changed (visible V2 badge, 0-downtime hot reload, 2/3 skipped)
+//   - step-02-backend         (0.1.10-v2test.2) : ONLY unified backend changed (3-platform signed teamhub + daemon + node-services/skills/installer, 2/3 skipped)
+//   - step-03-rollback-faulty (0.1.10-v2test.3) : ONLY faulty signed backend (rollbackSafe:false -> pg_dump/pg_restore + atomic rollback to .2 + denylist)
 //
-// Every step's Schema 3 `app-manifest.json` strictly inherits all 6 unchanged
-// modules' exact `artifactId`, `sha256`, `inputHash`, `originAppVersion`, and
+// Every step's Schema 3 `app-manifest.json` strictly inherits unchanged
+// bundles' exact `artifactId`, `sha256`, `inputHash`, `originAppVersion`, and
 // `url`, and is Ed25519-signed with `DESKTOP_UPDATE_KEY_PEM` (verified against
 // `UPDATE_PUBLIC_KEY` in `apps/desktop/src/main/update-manifest.ts`).
 import { createHash, createPublicKey, generateKeyPairSync, verify } from "node:crypto";
@@ -48,12 +44,8 @@ export function deriveStepVersions(baseVersion = "0.1.10-v2test.0") {
   return {
     "step-00-baseline": baseVersion,
     "step-01-web": v(1),
-    "step-02-skills-prompts": v(2),
-    "step-03-node-services": v(3),
-    "step-04-teamhub": v(4),
-    "step-05-computer-daemon": v(5),
-    "step-06-installer": v(6),
-    "step-07-rollback-faulty": v(7),
+    "step-02-backend": v(2),
+    "step-03-rollback-faulty": v(3),
   };
 }
 
@@ -61,56 +53,28 @@ export const STEP_DEFINITIONS = Object.freeze([
   {
     id: "step-00-baseline",
     changedModules: [...BUNDLE_IDS],
-    updateBehavior: "Initial V2 Store seed (all 7 bundles baseline)",
+    updateBehavior: "Initial 2+1 V2 Store seed (web + unified backend + node-native-deps)",
     rollbackSafe: true,
     dbSchemaEpoch: 892,
   },
   {
     id: "step-01-web",
     changedModules: ["web"],
-    updateBehavior: "0-downtime Web static-host hot reload + visible V2 badge (6/7 skipped)",
+    updateBehavior: "0-downtime Web static-host hot reload + visible V2 badge (backend & node-native-deps 0B skipped)",
     rollbackSafe: true,
     dbSchemaEpoch: 892,
   },
   {
-    id: "step-02-skills-prompts",
-    changedModules: ["skills-prompts"],
-    updateBehavior: "0-downtime silent Skills/Prompts hot reload (6/7 skipped)",
+    id: "step-02-backend",
+    changedModules: ["backend"],
+    updateBehavior: "Atomic signed backend rolling upgrade (teamhub + daemon + node-services/skills/installer; PG/LiveKit/Electron 0 restart; web & node-native-deps 0B skipped)",
     rollbackSafe: true,
     dbSchemaEpoch: 892,
   },
   {
-    id: "step-03-node-services",
-    changedModules: ["node-services"],
-    updateBehavior: "Partial node-services/voice-runtime restart + active drain protection (6/7 skipped)",
-    rollbackSafe: true,
-    dbSchemaEpoch: 892,
-  },
-  {
-    id: "step-04-teamhub",
-    changedModules: ["teamhub"],
-    updateBehavior: "Signed Go TeamHub rolling upgrade (PG/LiveKit/Electron 0 restart, 6/7 skipped)",
-    rollbackSafe: true,
-    dbSchemaEpoch: 892,
-  },
-  {
-    id: "step-05-computer-daemon",
-    changedModules: ["computer-daemon"],
-    updateBehavior: "Signed Go Computer Daemon + teamhub-cli idle-drain hot swap (6/7 skipped)",
-    rollbackSafe: true,
-    dbSchemaEpoch: 892,
-  },
-  {
-    id: "step-06-installer",
-    changedModules: ["installer"],
-    updateBehavior: "Noarch installer-only incremental update (6/7 skipped)",
-    rollbackSafe: true,
-    dbSchemaEpoch: 892,
-  },
-  {
-    id: "step-07-rollback-faulty",
-    changedModules: ["teamhub"],
-    updateBehavior: "Faulty signed TeamHub (rollbackSafe:false) -> pg_dump/pg_restore + auto-rollback to step-06 + denylist",
+    id: "step-03-rollback-faulty",
+    changedModules: ["backend"],
+    updateBehavior: "Faulty signed backend (rollbackSafe:false, exit 42) -> pg_dump/pg_restore + atomic rollback to step-02 + denylist",
     rollbackSafe: false,
     dbSchemaEpoch: 893,
   },
@@ -183,47 +147,88 @@ async function stageWebDir(workDir, { webDistDir, version, stepId, injectBanner,
   return stage;
 }
 
-async function stageSkillsPromptsDir(workDir, { repoRoot, version, stepId, addProbeSkill }) {
-  const stage = path.join(workDir, `skills-prompts-${stepId}`);
-  await mkdir(path.join(stage, "skills"), { recursive: true });
-  await mkdir(path.join(stage, "prompts"), { recursive: true });
-  await copyIfExists(path.join(repoRoot, "skills/builtin"), path.join(stage, "skills"));
-  await copyIfExists(path.join(repoRoot, "apps/node-services/prompts"), path.join(stage, "prompts"));
-  if (addProbeSkill) {
-    const probeDir = path.join(stage, "skills/v2-upgrade-probe");
-    await mkdir(probeDir, { recursive: true });
+async function stageNodeNativeDepsDir(workDir, { nodeNativeDepsDir, target, version }) {
+  const stage = path.join(workDir, `node-native-deps-${target}`);
+  await mkdir(stage, { recursive: true });
+  const src = nodeNativeDepsDir ? path.join(nodeNativeDepsDir, target) : null;
+  const copied = await copyIfExists(src, stage);
+  if (!copied) {
+    await mkdir(path.join(stage, "node_modules"), { recursive: true });
     await writeFile(
-      path.join(probeDir, "SKILL.md"),
-      `---\nname: v2-upgrade-probe\ndescription: Marker skill installed by Linger V2 ${stepId} (${version}) to prove 0-downtime skills-prompts hot reload.\n---\n\n` +
-        `# Linger V2 Skills Upgrade Marker\n\n- Step: \`${stepId}\`\n- App Version: \`${version}\`\n`,
-      "utf8",
-    );
-    await writeFile(
-      path.join(stage, "prompts/v2-upgrade-marker.txt"),
-      `LINGER_V2_PROMPTS_MARKER step=${stepId} version=${version}\n`,
+      path.join(stage, "node-native-deps-manifest.json"),
+      `${JSON.stringify({ target, appVersion: version, layout: "shared-node-deps" }, null, 2)}\n`,
       "utf8",
     );
   }
-  await writeFile(
-    path.join(stage, "v2-service-version.json"),
-    `${JSON.stringify({ module: "skills-prompts", stepId, appVersion: version }, null, 2)}\n`,
-    "utf8",
-  );
   return stage;
 }
 
-async function stageNodeServicesDir(workDir, { nodeServicesDir, version, stepId }) {
-  const stage = path.join(workDir, `node-services-${stepId}`);
-  await mkdir(stage, { recursive: true });
-  const copied = await copyIfExists(nodeServicesDir, stage);
-  if (!copied) {
+async function stageUnifiedBackendDir(
+  workDir,
+  {
+    repoRoot,
+    target,
+    version,
+    stepId,
+    teamhubRoot = null,
+    daemonRoot = null,
+    teamhubCliDir = null,
+    nodeServicesDir = null,
+    installerDistDir = null,
+    addUpgradeMarkers = false,
+    faulty = false,
+  },
+) {
+  const stage = path.join(workDir, `backend-${stepId}-${target}`);
+  const teamhubDest = path.join(stage, "teamhub");
+  const nodeServicesDest = path.join(stage, "node-services");
+  const skillsDest = path.join(stage, "skills");
+  const daemonDest = path.join(stage, "computer-daemon");
+  const installerDest = path.join(stage, "installer");
+
+  await mkdir(teamhubDest, { recursive: true });
+  await mkdir(nodeServicesDest, { recursive: true });
+  await mkdir(skillsDest, { recursive: true });
+  await mkdir(daemonDest, { recursive: true });
+  await mkdir(installerDest, { recursive: true });
+
+  const exe = (name) => (target.startsWith("win32-") ? `${name}.exe` : name);
+
+  // 1. teamhub/
+  const copiedTeamhub = await copyIfExists(
+    teamhubRoot ? path.join(teamhubRoot, target) : null,
+    teamhubDest,
+  );
+  if (!copiedTeamhub) {
+    const script = faulty
+      ? `#!/bin/sh\necho "[V2-TEST-FAULTY-${version}] simulated startup failure for rollback verification" >&2\nexit 42\n`
+      : `#!/bin/sh\necho "teamhub ${version} (${stepId}, ${target})"\n`;
+    for (const cmd of ["teamhub", "migrate", "account"]) {
+      const file = path.join(teamhubDest, exe(cmd));
+      await writeFile(
+        file,
+        cmd === "teamhub" ? script : `#!/bin/sh\necho "${cmd} ${version}"\n`,
+        "utf8",
+      );
+      await chmod(file, 0o755);
+    }
+  }
+
+  // 2. node-services/ (including prompts + voice-runtime)
+  const copiedNs = await copyIfExists(nodeServicesDir, nodeServicesDest);
+  if (!copiedNs) {
+    await mkdir(path.join(nodeServicesDest, "prompts"), { recursive: true });
+    await copyIfExists(
+      path.join(repoRoot, "apps/node-services/prompts"),
+      path.join(nodeServicesDest, "prompts"),
+    );
     await writeFile(
-      path.join(stage, "package.json"),
+      path.join(nodeServicesDest, "package.json"),
       `${JSON.stringify({ name: "@linger/node-services", private: true, type: "module", version }, null, 2)}\n`,
       "utf8",
     );
     await writeFile(
-      path.join(stage, "voice-runtime.mjs"),
+      path.join(nodeServicesDest, "voice-runtime.mjs"),
       `import http from "node:http";\n` +
         `const port = Number(process.env.LINGER_VOICE_RUNTIME_PORT || 0);\n` +
         `const version = ${JSON.stringify(version)};\n` +
@@ -244,80 +249,71 @@ async function stageNodeServicesDir(workDir, { nodeServicesDir, version, stepId 
       "utf8",
     );
   }
-  await writeFile(
-    path.join(stage, "v2-service-version.json"),
-    `${JSON.stringify({ module: "node-services", stepId, appVersion: version }, null, 2)}\n`,
-    "utf8",
-  );
-  return stage;
-}
-
-async function stageNodeNativeDepsDir(workDir, { nodeNativeDepsDir, target, version }) {
-  const stage = path.join(workDir, `node-native-deps-${target}`);
-  await mkdir(stage, { recursive: true });
-  const src = nodeNativeDepsDir ? path.join(nodeNativeDepsDir, target) : null;
-  const copied = await copyIfExists(src, stage);
-  if (!copied) {
-    await mkdir(path.join(stage, "node_modules"), { recursive: true });
+  if (addUpgradeMarkers) {
+    await mkdir(path.join(nodeServicesDest, "prompts"), { recursive: true });
     await writeFile(
-      path.join(stage, "node-native-deps-manifest.json"),
-      `${JSON.stringify({ target, appVersion: version, layout: "shared-node-deps" }, null, 2)}\n`,
+      path.join(nodeServicesDest, "prompts/v2-upgrade-marker.txt"),
+      `LINGER_V2_BACKEND_PROMPTS_MARKER step=${stepId} version=${version}\n`,
       "utf8",
     );
   }
-  return stage;
-}
 
-async function stageInstallerDir(workDir, { installerDistDir, version, stepId }) {
-  const stage = path.join(workDir, `installer-${stepId}`);
-  await mkdir(stage, { recursive: true });
-  const copied = await copyIfExists(installerDistDir, stage);
-  if (!copied) {
+  // 3. skills/
+  await copyIfExists(path.join(repoRoot, "skills/builtin"), skillsDest);
+  if (addUpgradeMarkers) {
+    const probeDir = path.join(skillsDest, "v2-upgrade-probe");
+    await mkdir(probeDir, { recursive: true });
     await writeFile(
-      path.join(stage, "index.mjs"),
+      path.join(probeDir, "SKILL.md"),
+      `---\nname: v2-upgrade-probe\ndescription: Marker skill installed by Linger V2 unified backend ${stepId} (${version}).\n---\n\n` +
+        `# Linger V2 Backend Upgrade Marker\n\n- Step: \`${stepId}\`\n- App Version: \`${version}\`\n`,
+      "utf8",
+    );
+  }
+
+  // 4. computer-daemon/ (signed daemon + teamhub-cli)
+  const copiedDaemon = await copyIfExists(
+    daemonRoot ? path.join(daemonRoot, target) : null,
+    daemonDest,
+  );
+  if (!copiedDaemon) {
+    const file = path.join(daemonDest, exe("linger-computer-daemon"));
+    await writeFile(
+      file,
+      `#!/bin/sh\necho "linger-computer-daemon ${version} (${stepId}, ${target})"\n`,
+      "utf8",
+    );
+    await chmod(file, 0o755);
+  }
+  if (teamhubCliDir) {
+    await copyIfExists(teamhubCliDir, path.join(daemonDest, "teamhub-cli"));
+  }
+
+  // 5. installer/
+  const copiedInstaller = await copyIfExists(installerDistDir, installerDest);
+  if (!copiedInstaller) {
+    await writeFile(
+      path.join(installerDest, "installer.js"),
       `export const installerVersion = ${JSON.stringify(version)};\n`,
       "utf8",
     );
   }
-  await writeFile(
-    path.join(stage, "v2-service-version.json"),
-    `${JSON.stringify({ module: "installer", stepId, appVersion: version }, null, 2)}\n`,
-    "utf8",
-  );
-  return stage;
-}
 
-async function stageTargetBinaryBundle(
-  workDir,
-  { moduleId, srcRoot, target, version, stepId, extraDir = null, extraSubdir = null, faulty = false },
-) {
-  const stage = path.join(workDir, `${moduleId}-${stepId}-${target}`);
-  await mkdir(stage, { recursive: true });
-  const src = srcRoot ? path.join(srcRoot, target) : null;
-  const copied = await copyIfExists(src, stage);
-  if (!copied) {
-    const exe = (name) => (target.startsWith("win32-") ? `${name}.exe` : name);
-    if (moduleId === "teamhub") {
-      const script = faulty
-        ? `#!/bin/sh\necho "[V2-TEST-FAULTY-${version}] simulated startup failure for rollback verification" >&2\nexit 42\n`
-        : `#!/bin/sh\necho "teamhub ${version} (${stepId}, ${target})"\n`;
-      for (const cmd of ["teamhub", "migrate", "account"]) {
-        const file = path.join(stage, exe(cmd));
-        await writeFile(file, cmd === "teamhub" ? script : `#!/bin/sh\necho "${cmd} ${version}"\n`, "utf8");
-        await chmod(file, 0o755);
-      }
-    } else if (moduleId === "computer-daemon") {
-      const file = path.join(stage, exe("linger-computer-daemon"));
-      await writeFile(file, `#!/bin/sh\necho "linger-computer-daemon ${version} (${stepId}, ${target})"\n`, "utf8");
-      await chmod(file, 0o755);
-    }
-  }
-  if (extraDir && extraSubdir) {
-    await copyIfExists(extraDir, path.join(stage, extraSubdir));
-  }
   await writeFile(
     path.join(stage, "v2-service-version.json"),
-    `${JSON.stringify({ module: moduleId, target, stepId, appVersion: version, faulty }, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        module: "backend",
+        layout: "2+1-unified-backend",
+        components: ["teamhub", "node-services", "skills", "computer-daemon", "installer"],
+        target,
+        stepId,
+        appVersion: version,
+        faulty,
+      },
+      null,
+      2,
+    )}\n`,
     "utf8",
   );
   return stage;
@@ -333,10 +329,11 @@ function buildTestGuideMarkdown({
   signedWith,
 }) {
   const isPortable = !baseUrl || baseUrl === "relative";
-  return `# Linger V2 Real-Device Signed Upgrade Test Guide
+  return `# Linger V2 (2+1 Architecture) Real-Device Signed Upgrade Test Guide
 
-This test kit was built by GitHub Actions (\`v2-signed-test-pack.yml\`, **non-release workflow_dispatch Artifact only** — no GitHub Release or tag was published).
+This test kit was built by GitHub Actions (\`v2-signed-test-pack.yml\`, **non-release Artifact only** — no GitHub Release or tag was published).
 
+- **Architecture**: **2+1** (\`web\` noarch + unified atomic \`backend\` per-target + cached \`node-native-deps\` per-target)
 - **Baseline Installer Version**: \`${baseVersion}\`
 - **Target Platforms**: ${targets.map((t) => `\`${t}\``).join(", ")}
 - **Manifest Ed25519 Key**: \`${signedWith}\`
@@ -354,7 +351,7 @@ From the GitHub Actions Run page (**Artifacts** section at the bottom):
    - **macOS (Apple Silicon)**: \`v2-test-installer-macos-arm64\` → \`Linger-${baseVersion}-macos-arm64.dmg\`
    - **Windows x64**: \`v2-test-installer-windows-x64\` → \`Linger-${baseVersion}-windows-x64-setup.exe\`
    - **Linux x64**: \`v2-test-installer-linux-x64\` → \`Linger-${baseVersion}-linux-x64.tar.gz\`
-2. Download the per-service upgrade pack bundle (shared across all 3 platforms):
+2. Download the 2+1 upgrade pack bundle (shared across all 3 platforms):
    - \`v2-test-service-upgrade-packs\` → unzip into any local folder (e.g. \`~/linger-v2-test-packs/\`).
 
 ---
@@ -366,18 +363,18 @@ cd ~/linger-v2-test-packs
 node serve-test-feed.mjs --step 00 --port 8787
 \`\`\`
 
-- Open **http://127.0.0.1:8787** in your browser to use the interactive Step Control Panel (or type \`00\`..\`07\` + Enter in the terminal).
+- Open **http://127.0.0.1:8787** in your browser to use the interactive Step Control Panel (or type \`00\`..\`03\` + Enter in the terminal).
 - For **multi-device LAN HTTPS testing**, run:
   \`\`\`bash
   node serve-test-feed.mjs --step 00 --host 0.0.0.0 --port 8443 --https
   \`\`\`
-  (or point any HTTPS reverse proxy / \`cloudflared tunnel --url http://127.0.0.1:8787\` at the local server — because the signed manifests use feed-relative bundle paths, the **exact CI-signed Ed25519 signature stays 100% valid on any URL**!).
+  Because the signed manifests use feed-relative bundle paths, the **exact CI-signed Ed25519 signature stays 100% valid on any URL**.
 
 ---
 
 ## 3. Launch the Installed Signed Client Against the Test Feed
 
-> **Note**: Ed25519 signature verification against Linger's built-in \`UPDATE_PUBLIC_KEY\` and SHA-256 verification on every \`.tar.zst\` bundle remain **100% enforced**. \`LINGER_ALLOW_LOOPBACK_TEST_FEED=1\` only permits \`http://127.0.0.1\` / \`http://localhost\` loopback transport.
+> Ed25519 signature verification against Linger's built-in \`UPDATE_PUBLIC_KEY\` and SHA-256 verification on every \`.tar.zst\` bundle remain **100% enforced**. \`LINGER_ALLOW_LOOPBACK_TEST_FEED=1\` only permits \`http://127.0.0.1\` / \`http://localhost\` loopback transport.
 
 ### macOS
 \`\`\`bash
@@ -408,18 +405,14 @@ LINGER_BUNDLE_CHECK_INTERVAL_MS=10000 \\
 
 ---
 
-## 4. Step-by-Step Real-Device Verification Matrix
+## 4. 4-Step Real-Device Verification Matrix (2+1 Model)
 
 | Step | Version | Changed Bundle | What to Observe |
 |---|---|---|---|
-| \`step-00-baseline\` | \`${versions["step-00-baseline"]}\` | All 7 (initial seed) | Seeds \`<LINGER_HOME>/store/\` with baseline bundles so steps 01–07 download **only 1/7 changed bundle**. |
-| \`step-01-web\` | \`${versions["step-01-web"]}\` | **ONLY \`web\`** | Feed log shows **only \`bundles/web/...\` downloaded** (6/7 skipped). Web UI hot-reloads with bottom-right pill **\`Linger V2 Test · step-01-web · ${versions["step-01-web"]}\`**. PG / TeamHub / LiveKit / Electron PIDs do NOT change. |
-| \`step-02-skills-prompts\` | \`${versions["step-02-skills-prompts"]}\` | **ONLY \`skills-prompts\`** | Feed log shows **only \`bundles/skills-prompts/...\` downloaded**. Commits silently with 0 downtime; \`store/skills-prompts/.../skills/v2-upgrade-probe/SKILL.md\` appears on disk. |
-| \`step-03-node-services\` | \`${versions["step-03-node-services"]}\` | **ONLY \`node-services\`** | Feed log shows **only \`bundles/node-services/...\` downloaded**. If an Agent task or voice session is active, enters \`waiting\` (drain protection) until idle, then restarts only node-services / voice-runtime. |
-| \`step-04-teamhub\` | \`${versions["step-04-teamhub"]}\` | **ONLY \`teamhub\`** | Feed log shows **only \`bundles/teamhub/teamhub-<target>-...\` downloaded**. macOS Gatekeeper / Windows Authenticode accepts the signed binary; TeamHub rolling-restarts while PG, LiveKit & Electron stay alive. |
-| \`step-05-computer-daemon\` | \`${versions["step-05-computer-daemon"]}\` | **ONLY \`computer-daemon\`** | Feed log shows **only \`bundles/computer-daemon/...\` downloaded**. Waits for running agent tasks = 0, swaps to signed \`${versions["step-05-computer-daemon"]}\` daemon + \`teamhub-cli\`, and reconnects. |
-| \`step-06-installer\` | \`${versions["step-06-installer"]}\` | **ONLY \`installer\`** | Feed log shows **only \`bundles/installer/...\` downloaded** (6/7 skipped). Commits \`${versions["step-06-installer"]}\`. |
-| \`step-07-rollback-faulty\` | \`${versions["step-07-rollback-faulty"]}\` | **ONLY faulty \`teamhub\`** (\`rollbackSafe: false\`) | Pre-migration \`pg_dump\` runs → faulty signed \`teamhub\` exits with code \`42\` → HealthWatchdog triggers \`pg_restore\` + automatic rollback to \`${versions["step-06-installer"]}\` → \`${versions["step-07-rollback-faulty"]}\` is written to \`state/denylist.json\` → subsequent checks skip it (no update loop!). |
+| \`step-00-baseline\` | \`${versions["step-00-baseline"]}\` | All 3 (\`web\` + \`backend\` + \`node-native-deps\`) | Seeds \`<LINGER_HOME>/store/\` & \`infra/node-deps/\` so steps 01–03 download **only 1/3 changed bundle** (0B for unchanged bundles). |
+| \`step-01-web\` | \`${versions["step-01-web"]}\` | **ONLY \`web\`** (\`backend\` & \`node-native-deps\` skipped 0B) | Feed log shows **only \`bundles/web/...\` downloaded**. Web UI hot-reloads with bottom-right pill **\`Linger V2 Test · step-01-web · ${versions["step-01-web"]}\`**. No re-login; PG / TeamHub / LiveKit / Electron PIDs do NOT change. |
+| \`step-02-backend\` | \`${versions["step-02-backend"]}\` | **ONLY \`backend\`** (\`web\` & \`node-native-deps\` skipped 0B) | Feed log shows **only \`bundles/backend/backend-<target>-...\` downloaded**. Active agent tasks / voice sessions drain first (\`waiting\`); macOS Gatekeeper / Windows Authenticode accepts signed \`teamhub\` + \`linger-computer-daemon\`; atomic backend rolling restart completes while PG, LiveKit & Electron stay alive. \`skills/v2-upgrade-probe/SKILL.md\` and \`node-services/prompts/v2-upgrade-marker.txt\` appear on disk. |
+| \`step-03-rollback-faulty\` | \`${versions["step-03-rollback-faulty"]}\` | **ONLY faulty \`backend\`** (\`rollbackSafe: false\`) | Pre-migration \`pg_dump\` runs → faulty signed \`teamhub\` exits with code \`42\` → HealthWatchdog triggers \`pg_restore\` + atomic rollback to \`${versions["step-02-backend"]}\` → \`${versions["step-03-rollback-faulty"]}\` is written to \`state/denylist.json\` → subsequent update checks skip it (zero upgrade loop!). |
 `;
 }
 
@@ -494,7 +487,6 @@ export async function buildV2TestUpgradePacks({
         arch: "noarch",
         originAppVersion,
         inputHash: sha256String(`${bundleId}:${originAppVersion}:${packed.sha256}`),
-        ...(bundleId === "node-services" ? { nativeDepsHash: nativeDepsInfo.hash } : {}),
         artifact: {
           artifactId: packed.artifactId,
           format: "tar.zst",
@@ -519,7 +511,7 @@ export async function buildV2TestUpgradePacks({
         checksumFiles.push({ rel: `bundles/${bundleId}/${packed.fileName}`, sha256: packed.sha256 });
         hashParts.push(`${target}:${packed.sha256}`);
         const signed =
-          bundleId === "teamhub" || bundleId === "computer-daemon"
+          bundleId === "backend"
             ? signedKindFor(target, { macosSigned, windowsSigned })
             : undefined;
         targetEntries[target] = {
@@ -535,96 +527,11 @@ export async function buildV2TestUpgradePacks({
         arch: "per-target",
         originAppVersion,
         inputHash: sha256String(`${bundleId}:${originAppVersion}:${hashParts.join("|")}`),
+        ...(bundleId === "backend" ? { nativeDepsHash: nativeDepsInfo.hash } : {}),
         targets: targetEntries,
       };
     };
 
-    // --- Step 00: Baseline (all 7 bundles) ---
-    const v0 = versions["step-00-baseline"];
-    const baselineBundles = {};
-
-    baselineBundles.web = await packNoarch(
-      "web",
-      await stageWebDir(work, {
-        webDistDir: webDistDir ?? path.join(repoRoot, "apps/web/dist"),
-        version: v0,
-        stepId: "step-00-baseline",
-        injectBanner: false,
-        staticHostSrc,
-      }),
-      v0,
-    );
-
-    baselineBundles["skills-prompts"] = await packNoarch(
-      "skills-prompts",
-      await stageSkillsPromptsDir(work, {
-        repoRoot,
-        version: v0,
-        stepId: "step-00-baseline",
-        addProbeSkill: false,
-      }),
-      v0,
-    );
-
-    baselineBundles["node-services"] = await packNoarch(
-      "node-services",
-      await stageNodeServicesDir(work, {
-        nodeServicesDir,
-        version: v0,
-        stepId: "step-00-baseline",
-      }),
-      v0,
-    );
-
-    const nativeDepsStages = {};
-    for (const target of targets) {
-      nativeDepsStages[target] = await stageNodeNativeDepsDir(work, {
-        nodeNativeDepsDir,
-        target,
-        version: v0,
-      });
-    }
-    baselineBundles["node-native-deps"] = await packPerTarget(
-      "node-native-deps",
-      nativeDepsStages,
-      v0,
-    );
-
-    const teamhubV0Stages = {};
-    const daemonV0Stages = {};
-    for (const target of targets) {
-      teamhubV0Stages[target] = await stageTargetBinaryBundle(work, {
-        moduleId: "teamhub",
-        srcRoot: teamhubDir,
-        target,
-        version: v0,
-        stepId: "step-00-baseline",
-      });
-      daemonV0Stages[target] = await stageTargetBinaryBundle(work, {
-        moduleId: "computer-daemon",
-        srcRoot: daemonDir,
-        target,
-        version: v0,
-        stepId: "step-00-baseline",
-        extraDir: teamhubCliDir,
-        extraSubdir: "teamhub-cli",
-      });
-    }
-    baselineBundles.teamhub = await packPerTarget("teamhub", teamhubV0Stages, v0);
-    baselineBundles["computer-daemon"] = await packPerTarget("computer-daemon", daemonV0Stages, v0);
-
-    baselineBundles.installer = await packNoarch(
-      "installer",
-      await stageInstallerDir(work, {
-        installerDistDir: installerDistDir ?? path.join(repoRoot, "apps/linger-installer/dist"),
-        version: v0,
-        stepId: "step-00-baseline",
-      }),
-      v0,
-    );
-
-    // Helper that clones previous step's bundles and replaces ONLY the specified bundle(s)
-    const manifestsByStep = {};
     const writeStep = async (def, bundles) => {
       const appVersion = versions[def.id];
       const manifest = {
@@ -686,15 +593,59 @@ export async function buildV2TestUpgradePacks({
         `${JSON.stringify(summary, null, 2)}\n`,
         "utf8",
       );
-      manifestsByStep[def.id] = manifest;
       stepSummaries.push(summary);
       return manifest;
     };
 
+    // --- Step 00: Baseline (web + unified backend + node-native-deps) ---
+    const v0 = versions["step-00-baseline"];
+    const baselineBundles = {};
+
+    baselineBundles.web = await packNoarch(
+      "web",
+      await stageWebDir(work, {
+        webDistDir: webDistDir ?? path.join(repoRoot, "apps/web/dist"),
+        version: v0,
+        stepId: "step-00-baseline",
+        injectBanner: false,
+        staticHostSrc,
+      }),
+      v0,
+    );
+
+    const backendV0Stages = {};
+    const nativeDepsStages = {};
+    for (const target of targets) {
+      backendV0Stages[target] = await stageUnifiedBackendDir(work, {
+        repoRoot,
+        target,
+        version: v0,
+        stepId: "step-00-baseline",
+        teamhubRoot: teamhubDir,
+        daemonRoot: daemonDir,
+        teamhubCliDir,
+        nodeServicesDir,
+        installerDistDir: installerDistDir ?? path.join(repoRoot, "apps/linger-installer/dist"),
+        addUpgradeMarkers: false,
+        faulty: false,
+      });
+      nativeDepsStages[target] = await stageNodeNativeDepsDir(work, {
+        nodeNativeDepsDir,
+        target,
+        version: v0,
+      });
+    }
+    baselineBundles.backend = await packPerTarget("backend", backendV0Stages, v0);
+    baselineBundles["node-native-deps"] = await packPerTarget(
+      "node-native-deps",
+      nativeDepsStages,
+      v0,
+    );
+
     let prevBundles = baselineBundles;
     await writeStep(STEP_DEFINITIONS[0], prevBundles);
 
-    // --- Step 01: web only ---
+    // --- Step 01: ONLY web changed (backend & node-native-deps 100% reused) ---
     {
       const def = STEP_DEFINITIONS[1];
       const ver = versions[def.id];
@@ -714,126 +665,61 @@ export async function buildV2TestUpgradePacks({
       prevBundles = next;
     }
 
-    // --- Step 02: skills-prompts only ---
+    // --- Step 02: ONLY unified backend changed (web & node-native-deps 100% reused) ---
     {
       const def = STEP_DEFINITIONS[2];
       const ver = versions[def.id];
       const next = structuredClone(prevBundles);
-      next["skills-prompts"] = await packNoarch(
-        "skills-prompts",
-        await stageSkillsPromptsDir(work, {
+      const stages = {};
+      for (const target of targets) {
+        stages[target] = await stageUnifiedBackendDir(work, {
           repoRoot,
+          target,
           version: ver,
           stepId: def.id,
-          addProbeSkill: true,
-        }),
-        ver,
-      );
+          teamhubRoot: teamhubV2Dir ?? teamhubDir,
+          daemonRoot: daemonV2Dir ?? daemonDir,
+          teamhubCliDir,
+          nodeServicesDir,
+          installerDistDir: installerDistDir ?? path.join(repoRoot, "apps/linger-installer/dist"),
+          addUpgradeMarkers: true,
+          faulty: false,
+        });
+      }
+      next.backend = await packPerTarget("backend", stages, ver);
       await writeStep(def, next);
       prevBundles = next;
     }
 
-    // --- Step 03: node-services only ---
+    // --- Step 03: ONLY faulty signed backend changed (rollbackSafe: false) ---
     {
       const def = STEP_DEFINITIONS[3];
       const ver = versions[def.id];
       const next = structuredClone(prevBundles);
-      next["node-services"] = await packNoarch(
-        "node-services",
-        await stageNodeServicesDir(work, {
+      const stages = {};
+      for (const target of targets) {
+        stages[target] = await stageUnifiedBackendDir(work, {
+          repoRoot,
+          target,
+          version: ver,
+          stepId: def.id,
+          teamhubRoot: teamhubFaultyDir,
+          daemonRoot: daemonV2Dir ?? daemonDir,
+          teamhubCliDir,
           nodeServicesDir,
-          version: ver,
-          stepId: def.id,
-        }),
-        ver,
-      );
-      await writeStep(def, next);
-      prevBundles = next;
-    }
-
-    // --- Step 04: teamhub only (3-platform signed) ---
-    {
-      const def = STEP_DEFINITIONS[4];
-      const ver = versions[def.id];
-      const next = structuredClone(prevBundles);
-      const stages = {};
-      for (const target of targets) {
-        stages[target] = await stageTargetBinaryBundle(work, {
-          moduleId: "teamhub",
-          srcRoot: teamhubV2Dir ?? teamhubDir,
-          target,
-          version: ver,
-          stepId: def.id,
-        });
-      }
-      next.teamhub = await packPerTarget("teamhub", stages, ver);
-      await writeStep(def, next);
-      prevBundles = next;
-    }
-
-    // --- Step 05: computer-daemon + teamhub-cli only (3-platform signed) ---
-    {
-      const def = STEP_DEFINITIONS[5];
-      const ver = versions[def.id];
-      const next = structuredClone(prevBundles);
-      const stages = {};
-      for (const target of targets) {
-        stages[target] = await stageTargetBinaryBundle(work, {
-          moduleId: "computer-daemon",
-          srcRoot: daemonV2Dir ?? daemonDir,
-          target,
-          version: ver,
-          stepId: def.id,
-          extraDir: teamhubCliDir,
-          extraSubdir: "teamhub-cli",
-        });
-      }
-      next["computer-daemon"] = await packPerTarget("computer-daemon", stages, ver);
-      await writeStep(def, next);
-      prevBundles = next;
-    }
-
-    // --- Step 06: installer only (noarch) ---
-    {
-      const def = STEP_DEFINITIONS[6];
-      const ver = versions[def.id];
-      const next = structuredClone(prevBundles);
-      next.installer = await packNoarch(
-        "installer",
-        await stageInstallerDir(work, {
           installerDistDir: installerDistDir ?? path.join(repoRoot, "apps/linger-installer/dist"),
-          version: ver,
-          stepId: def.id,
-        }),
-        ver,
-      );
-      await writeStep(def, next);
-      prevBundles = next;
-    }
-
-    // --- Step 07: faulty signed teamhub (rollbackSafe: false) ---
-    {
-      const def = STEP_DEFINITIONS[7];
-      const ver = versions[def.id];
-      const next = structuredClone(prevBundles);
-      const stages = {};
-      for (const target of targets) {
-        stages[target] = await stageTargetBinaryBundle(work, {
-          moduleId: "teamhub",
-          srcRoot: teamhubFaultyDir,
-          target,
-          version: ver,
-          stepId: def.id,
+          addUpgradeMarkers: true,
           faulty: true,
         });
       }
-      next.teamhub = await packPerTarget("teamhub", stages, ver);
+      next.backend = await packPerTarget("backend", stages, ver);
       await writeStep(def, next);
     }
 
     // Write manifest-index.json
     const indexPayload = {
       schema: 1,
+      architecture: "2+1",
       generatedAt: new Date().toISOString(),
       baseVersion,
       channel,
@@ -896,11 +782,11 @@ export async function buildV2TestUpgradePacks({
 }
 
 /**
- * Verifies every generated step in a V2 test upgrade kit:
+ * Verifies every generated step in a 2+1 V2 test upgrade kit:
  *  - Ed25519 signature over raw app-manifest.json bytes
  *  - Every referenced .tar.zst exists and matches its sha256 + byte size
- *  - Every incremental step (step-01..step-07) changes EXACTLY its 1 target bundle
- *    and bit-for-bit inherits all 6 unchanged bundles from the preceding step.
+ *  - Every incremental step (step-01..step-03) changes EXACTLY its 1 target bundle
+ *    and bit-for-bit inherits the other 2 bundles from the preceding step.
  */
 export async function verifyV2TestUpgradeKit(
   kitDir,
@@ -936,7 +822,6 @@ export async function verifyV2TestUpgradeKit(
       throw new Error(`${step.id}: expected schema 3, got ${manifest.schema}`);
     }
 
-    // Verify all referenced archives exist & match sha256 + size
     for (const bundleId of BUNDLE_IDS) {
       const entry = manifest.bundles[bundleId];
       if (!entry) throw new Error(`${step.id}: missing bundle ${bundleId}`);
@@ -958,7 +843,6 @@ export async function verifyV2TestUpgradeKit(
       }
     }
 
-    // Verify exact 1-module delta inheritance against previous step
     if (prevManifest) {
       const actualChanged = [];
       for (const bundleId of BUNDLE_IDS) {

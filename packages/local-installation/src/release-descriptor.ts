@@ -4,13 +4,7 @@ import path from "node:path";
 
 export type UpdateChannel = "stable" | "beta" | "canary";
 
-export type BundleModuleId =
-  | "web"
-  | "node-services"
-  | "teamhub"
-  | "computer-daemon"
-  | "installer"
-  | "skills-prompts";
+export type BundleModuleId = "web" | "backend";
 
 export const RELEASE_DESCRIPTOR_SCHEMA = 1;
 export const DENYLIST_SCHEMA = 1;
@@ -70,14 +64,7 @@ export interface DenylistState {
 }
 
 const CHANNELS = new Set<UpdateChannel>(["stable", "beta", "canary"]);
-const MODULE_IDS: readonly BundleModuleId[] = [
-  "web",
-  "node-services",
-  "teamhub",
-  "computer-daemon",
-  "installer",
-  "skills-prompts",
-];
+const MODULE_IDS: readonly BundleModuleId[] = ["web", "backend"];
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const RETRYABLE_RENAME_CODES = new Set(["EPERM", "EBUSY", "EACCES"]);
 

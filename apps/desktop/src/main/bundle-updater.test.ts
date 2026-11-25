@@ -100,42 +100,18 @@ describe("BundleUpdaterModule", () => {
           inputHash: "1".repeat(64),
           artifact: mkRef("web", webV2Pack, true), // primary fails -> mirror succeeds!
         },
-        "node-services": {
-          arch: "noarch",
+        backend: {
+          arch: "per-target",
           originAppVersion: "0.2.14",
           inputHash: "2".repeat(64),
           nativeDepsHash: nodeDepsHash,
-          artifact: mkRef("node-services", basePack),
+          targets: { "darwin-arm64": mkRef("backend", basePack) },
         },
         "node-native-deps": {
           arch: "per-target",
           originAppVersion: "0.2.0",
           inputHash: "3".repeat(64),
           targets: { "darwin-arm64": mkRef("node-native-deps", basePack) },
-        },
-        teamhub: {
-          arch: "per-target",
-          originAppVersion: "0.2.14",
-          inputHash: "4".repeat(64),
-          targets: { "darwin-arm64": mkRef("teamhub", basePack) },
-        },
-        "computer-daemon": {
-          arch: "per-target",
-          originAppVersion: "0.2.14",
-          inputHash: "5".repeat(64),
-          targets: { "darwin-arm64": mkRef("computer-daemon", basePack) },
-        },
-        installer: {
-          arch: "noarch",
-          originAppVersion: "0.2.14",
-          inputHash: "6".repeat(64),
-          artifact: mkRef("installer", basePack),
-        },
-        "skills-prompts": {
-          arch: "noarch",
-          originAppVersion: "0.2.14",
-          inputHash: "7".repeat(64),
-          artifact: mkRef("skills-prompts", basePack),
         },
       },
     };
@@ -178,22 +154,14 @@ describe("BundleUpdaterModule", () => {
     );
     await host.start();
 
-    // Pre-populate all non-web modules + node-native-deps in BundleStore!
+    // Pre-populate backend + node-native-deps in BundleStore!
     await store.stageNodeDepsArchive(nodeDepsShortId, basePack.filePath, basePack.sha256);
-    for (const mod of [
-      "node-services",
-      "teamhub",
-      "computer-daemon",
-      "installer",
-      "skills-prompts",
-    ] as const) {
-      await store.stageModuleArchive(
-        mod,
-        `${mod}-${basePack.sha256.slice(0, 12)}`,
-        basePack.filePath,
-        basePack.sha256,
-      );
-    }
+    await store.stageModuleArchive(
+      "backend",
+      `backend-${basePack.sha256.slice(0, 12)}`,
+      basePack.filePath,
+      basePack.sha256,
+    );
 
     await updater.check();
 
@@ -206,7 +174,7 @@ describe("BundleUpdaterModule", () => {
     // Mirror was used for web, and ZERO other bundles were downloaded!
     expect(fetchedUrls).toContain("https://broken.example.com/web.tar.zst");
     expect(fetchedUrls).toContain("https://mirror.example.com/linger/bundles/web/web.tar.zst");
-    expect(fetchedUrls.some((u) => u.includes("/teamhub/"))).toBe(false);
+    expect(fetchedUrls.some((u) => u.includes("/backend/"))).toBe(false);
     expect(fetchedUrls.some((u) => u.includes("/node-native-deps/"))).toBe(false);
 
     await host.stop("quit");
@@ -246,12 +214,8 @@ describe("BundleUpdaterModule", () => {
       },
       bundles: {
         web: { arch: "noarch", originAppVersion: "0.2.20", inputHash: "1".repeat(64), artifact: dummyRef },
-        "node-services": { arch: "noarch", originAppVersion: "0.2.20", inputHash: "2".repeat(64), artifact: dummyRef },
+        backend: { arch: "per-target", originAppVersion: "0.2.20", inputHash: "2".repeat(64), targets: { "darwin-arm64": dummyRef } },
         "node-native-deps": { arch: "per-target", originAppVersion: "0.2.0", inputHash: "3".repeat(64), targets: { "darwin-arm64": dummyRef } },
-        teamhub: { arch: "per-target", originAppVersion: "0.2.20", inputHash: "4".repeat(64), targets: { "darwin-arm64": dummyRef } },
-        "computer-daemon": { arch: "per-target", originAppVersion: "0.2.20", inputHash: "5".repeat(64), targets: { "darwin-arm64": dummyRef } },
-        installer: { arch: "noarch", originAppVersion: "0.2.20", inputHash: "6".repeat(64), artifact: dummyRef },
-        "skills-prompts": { arch: "noarch", originAppVersion: "0.2.20", inputHash: "7".repeat(64), artifact: dummyRef },
       },
     };
     const signed = makeSignedPayload(manifest, privateKey);

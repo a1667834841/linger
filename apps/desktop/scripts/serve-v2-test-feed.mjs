@@ -178,13 +178,13 @@ ${envLoopback}LINGER_UPDATE_FEED_URL=${esc(feedUrl)} LINGER_BUNDLE_CHECK_DELAY_M
 ${winLoopback}$env:LINGER_UPDATE_FEED_URL="${esc(feedUrl)}"; $env:LINGER_BUNDLE_CHECK_DELAY_MS="3000"; $env:LINGER_BUNDLE_CHECK_INTERVAL_MS="10000"; & "$env:LOCALAPPDATA\\Programs\\Linger\\Linger.exe"</pre>
   </div>
 
-  <h2>Per-Service Signed Upgrade Steps</h2>
+  <h2>2+1 Signed Upgrade Steps</h2>
   <table>
     <thead><tr><th>Step</th><th>App Version</th><th>Changed Module(s)</th><th>Expected Behavior</th><th>Rollback</th><th>Action</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
 
-  <h2>Live Client Requests (verify only 1/7 bundle downloads per step)</h2>
+  <h2>Live Client Requests (verify only 1/3 bundle downloads per incremental step)</h2>
   <table>
     <thead><tr><th>Time</th><th>Active Step</th><th>Path</th><th>HTTP</th><th>Bytes</th></tr></thead>
     <tbody>${logs || '<tr><td colspan="5" style="color:#94a3b8;">No requests yet. Launch Linger or trigger Check for Updates.</td></tr>'}</tbody>
@@ -449,7 +449,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     );
   }
   process.stdout.write("\n Switch step anytime:\n");
-  process.stdout.write("   - Type 00..07 + Enter in this terminal, OR\n");
+  process.stdout.write("   - Type 00..03 + Enter in this terminal, OR\n");
   process.stdout.write(`   - Open ${instance.feedUrl} in your browser, OR\n`);
   process.stdout.write(`   - curl -X POST "${instance.feedUrl}/__test/switch?step=01"\n\n`);
 

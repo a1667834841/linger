@@ -68,14 +68,7 @@ const CHECK_DELAY_MS = 60_000;
 const CHECK_INTERVAL_MS = 60 * 60_000;
 const RETRY_DELAY_MS = 5 * 60_000;
 
-const MODULE_IDS: readonly BundleModuleId[] = [
-  "web",
-  "node-services",
-  "teamhub",
-  "computer-daemon",
-  "installer",
-  "skills-prompts",
-];
+const MODULE_IDS: readonly BundleModuleId[] = ["web", "backend"];
 
 function shortNodeDepsId(hash: string): string {
   const hex = hash.replace(/^sha256:/, "");

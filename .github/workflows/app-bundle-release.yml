@@ -1,17 +1,17 @@
-name: App bundle release (V2 incremental)
+name: App bundle release (V2 2+1 incremental)
 
-# High-frequency incremental business release pipeline.
-# Builds ONLY modules whose deterministic inputHash changed since the previous
-# release in the target channel; unchanged modules inherit their existing URL
-# and SHA-256 directly into the signed Schema 3 app-manifest.json.
-# Typical end-to-end duration: 3-5 minutes (no DMG/NSIS/Apple notarization).
+# High-frequency incremental business release pipeline (2+1 model: web + unified
+# backend + cached node-native-deps). Builds ONLY modules whose deterministic
+# inputHash changed since the previous release in the target channel; unchanged
+# modules inherit their existing URL and SHA-256 directly into the signed
+# Schema 3 app-manifest.json.
 on:
   push:
     tags: ["app-v*"]
   workflow_dispatch:
     inputs:
       version:
-        description: App version to publish (e.g. 0.2.15 or 0.2.16-canary.1)
+        description: App version to publish (e.g. 0.1.10 or 0.1.11-canary.1)
         required: true
       channel:
         description: Release channel
@@ -25,7 +25,7 @@ on:
       min_shell_version:
         description: Minimum compatible Desktop Shell version
         type: string
-        default: "0.2.0"
+        default: "0.1.10"
       publish:
         description: Upload bundles and sign/publish channel app-manifest.json
         type: boolean
@@ -52,12 +52,8 @@ jobs:
       min_shell_version: ${{ steps.meta.outputs.min_shell_version }}
       publish: ${{ steps.meta.outputs.publish }}
       build_web: ${{ steps.plan.outputs.build_web }}
-      build_node_services: ${{ steps.plan.outputs.build_node_services }}
+      build_backend: ${{ steps.plan.outputs.build_backend }}
       build_node_native_deps: ${{ steps.plan.outputs.build_node_native_deps }}
-      build_teamhub: ${{ steps.plan.outputs.build_teamhub }}
-      build_computer_daemon: ${{ steps.plan.outputs.build_computer_daemon }}
-      build_installer: ${{ steps.plan.outputs.build_installer }}
-      build_skills_prompts: ${{ steps.plan.outputs.build_skills_prompts }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -76,7 +72,7 @@ jobs:
             channel="stable"
             if [[ "$ver" == *-* ]]; then channel="canary"; fi
             rollout="100"
-            min_shell="0.2.0"
+            min_shell="0.1.10"
             publish="true"
           fi
           echo "version=$ver" >> "$GITHUB_OUTPUT"
@@ -95,7 +91,7 @@ jobs:
           if curl -fsSL "$url" -o .linger-runtime/app-bundles/prev-manifest.json; then
             echo "Loaded previous manifest for channel=$channel"
           else
-            echo "No previous manifest found for channel=$channel; building all bundles"
+            echo "No previous manifest found for channel=$channel; building all 2+1 bundles"
           fi
 
       - id: plan
@@ -120,53 +116,37 @@ jobs:
             }
           '
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: app-bundle-plan
           path: .linger-runtime/app-bundles/plan.json
           retention-days: 7
 
-  build-noarch:
+  build-web:
     needs: plan
-    if: >-
-      needs.plan.outputs.build_web == 'true' ||
-      needs.plan.outputs.build_node_services == 'true' ||
-      needs.plan.outputs.build_installer == 'true' ||
-      needs.plan.outputs.build_skills_prompts == 'true'
+    if: needs.plan.outputs.build_web == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - name: Build changed noarch bundles (web / node-services / installer / skills-prompts)
+      - name: Build noarch web bundle
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p .linger-runtime/app-bundles/bundles
-          if [ "${{ needs.plan.outputs.build_skills_prompts }}" = "true" ]; then
-            node apps/desktop/scripts/build-app-bundles.mjs \
-              --mode skills-prompts \
-              --out .linger-runtime/app-bundles
-          fi
-          if [ "${{ needs.plan.outputs.build_web }}" = "true" ]; then
-            pnpm --filter @linger/web run build:assets --skip-precompress
-          fi
-          if [ "${{ needs.plan.outputs.build_installer }}" = "true" ]; then
-            node apps/linger-installer/scripts/build.mjs
-          fi
-      - uses: actions/upload-artifact@v4
+          pnpm --filter @linger/web run build:assets --skip-precompress
+      - uses: actions/upload-artifact@v7
         with:
-          name: app-bundles-noarch
-          path: .linger-runtime/app-bundles/bundles
+          name: app-bundle-web
+          path: apps/web/dist
           retention-days: 7
 
-  build-go-targets:
+  build-backend-targets:
     needs: plan
-    if: >-
-      needs.plan.outputs.build_teamhub == 'true' ||
-      needs.plan.outputs.build_computer_daemon == 'true'
+    if: needs.plan.outputs.build_backend == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -174,51 +154,52 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - name: Cross-compile changed Go binaries (${{ matrix.target }})
+      - name: Build unified backend bundle (${{ matrix.target }})
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p .linger-runtime/app-bundles/targets/${{ matrix.target }}
-          if [ "${{ needs.plan.outputs.build_computer_daemon }}" = "true" ]; then
-            node apps/desktop/scripts/build-daemon.mjs --target "${{ matrix.target }}"
-            cp -r "apps/desktop/dist/computer/${{ matrix.target }}" ".linger-runtime/app-bundles/targets/${{ matrix.target }}/daemon"
-          fi
-      - uses: actions/upload-artifact@v4
+          node apps/linger-installer/scripts/build.mjs
+          node apps/desktop/scripts/build-daemon.mjs --target "${{ matrix.target }}"
+          node apps/desktop/scripts/build-app-bundles.mjs \
+            --mode backend \
+            --target "${{ matrix.target }}" \
+            --daemon-dir "apps/desktop/dist/computer/${{ matrix.target }}" \
+            --installer-dir apps/linger-installer/dist \
+            --out .linger-runtime/app-bundles
+      - uses: actions/upload-artifact@v7
         with:
-          name: app-bundles-go-${{ matrix.target }}
-          path: .linger-runtime/app-bundles/targets/${{ matrix.target }}
+          name: app-bundle-backend-${{ matrix.target }}
+          path: .linger-runtime/app-bundles/bundles/backend
           retention-days: 7
 
   publish:
-    needs: [plan, build-noarch, build-go-targets]
+    needs: [plan, build-web, build-backend-targets]
     if: >-
       always() &&
       needs.plan.result == 'success' &&
-      (needs.build-noarch.result == 'success' || needs.build-noarch.result == 'skipped') &&
-      (needs.build-go-targets.result == 'success' || needs.build-go-targets.result == 'skipped') &&
+      (needs.build-web.result == 'success' || needs.build-web.result == 'skipped') &&
+      (needs.build-backend-targets.result == 'success' || needs.build-backend-targets.result == 'skipped') &&
       needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: app-bundle*
           path: .linger-runtime/app-bundles
           merge-multiple: true
-      - name: Assemble and Ed25519-sign Schema 3 app-manifest.json
+      - name: Assemble and Ed25519-sign Schema 3 2+1 app-manifest.json
         env:
           DESKTOP_UPDATE_KEY_PEM: ${{ secrets.DESKTOP_UPDATE_KEY_PEM }}
         shell: bash
         run: |
           set -euo pipefail
           umask 077
-          sign_args=()
           if [ -n "$DESKTOP_UPDATE_KEY_PEM" ]; then
             key="$RUNNER_TEMP/update.pem"
             trap 'rm -f "$key"' EXIT
             printf '%s\n' "$DESKTOP_UPDATE_KEY_PEM" > "$key"
-            sign_args=(--sign-key "$key")
           fi
-          echo "Ready to sign and publish app-v${{ needs.plan.outputs.version }} to channel=${{ needs.plan.outputs.channel }} (rollout=${{ needs.plan.outputs.rollout_percent }}%)"
+          echo "Ready to sign and publish app-v${{ needs.plan.outputs.version }} (2+1) to channel=${{ needs.plan.outputs.channel }} (rollout=${{ needs.plan.outputs.rollout_percent }}%)"

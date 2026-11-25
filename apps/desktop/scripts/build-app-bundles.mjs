@@ -6,7 +6,7 @@
 //     --version 0.2.15 --channel stable --out <dir> \
 //     --base-url https://cdn.example.com/linger \
 //     [--prev-manifest <path>] [--sign-key <ed25519.pem>] \
-//     [--min-shell 0.2.0] [--rollout-percent 100] [--bundles web,skills-prompts]
+//     [--min-shell 0.1.10] [--rollout-percent 100] [--bundles web,backend]
 import { spawn } from "node:child_process";
 import { createHash, createPrivateKey, createPublicKey, sign, verify } from "node:crypto";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
@@ -99,24 +99,40 @@ export async function packDeterministicTarZst(sourceDir, outDir, bundleId, suffi
 }
 
 /**
- * Packages the L2 skills-prompts bundle (skills/builtin + apps/node-services/prompts).
+ * Packages the unified atomic `backend` bundle for a single target:
+ *   - teamhub/         (signed teamhub, migrate, account)
+ *   - node-services/   (esbuild entries + voice-runtime + prompts)
+ *   - skills/          (skills/builtin)
+ *   - computer-daemon/ (signed linger-computer-daemon + teamhub-cli)
+ *   - installer/       (linger-installer dist)
  */
-export async function packageSkillsPromptsBundle(repoRoot, outDir) {
-  const work = await mkdtemp(path.join(tmpdir(), "linger-skills-pack-"));
+export async function packageBackendBundle({
+  target,
+  outDir,
+  teamhubDir = null,
+  nodeServicesDir = null,
+  skillsDir = null,
+  computerDaemonDir = null,
+  installerDir = null,
+}) {
+  if (!target) throw new Error("packageBackendBundle requires target");
+  const work = await mkdtemp(path.join(tmpdir(), `linger-backend-${target}-`));
   try {
-    const skillsSrc = path.join(repoRoot, "skills/builtin");
-    const promptsSrc = path.join(repoRoot, "apps/node-services/prompts");
-    if (existsSync(skillsSrc)) {
-      await cp(skillsSrc, path.join(work, "skills"), { recursive: true });
-    } else {
-      await mkdir(path.join(work, "skills"), { recursive: true });
+    const sections = [
+      ["teamhub", teamhubDir],
+      ["node-services", nodeServicesDir],
+      ["skills", skillsDir],
+      ["computer-daemon", computerDaemonDir],
+      ["installer", installerDir],
+    ];
+    for (const [sub, src] of sections) {
+      const dest = path.join(work, sub);
+      await mkdir(dest, { recursive: true });
+      if (src && existsSync(src)) {
+        await cp(src, dest, { recursive: true });
+      }
     }
-    if (existsSync(promptsSrc)) {
-      await cp(promptsSrc, path.join(work, "prompts"), { recursive: true });
-    } else {
-      await mkdir(path.join(work, "prompts"), { recursive: true });
-    }
-    return await packDeterministicTarZst(work, outDir, "skills-prompts");
+    return await packDeterministicTarZst(work, outDir, "backend", target);
   } finally {
     await rm(work, { recursive: true, force: true });
   }
@@ -196,6 +212,7 @@ export function assembleManifestV3({
         arch: "per-target",
         originAppVersion: appVersion,
         inputHash: entry.inputHash,
+        ...(entry.nativeDepsHash ? { nativeDepsHash: entry.nativeDepsHash } : {}),
         targets,
       };
     }
@@ -293,8 +310,24 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     await mkdir(outDir, { recursive: true });
     await writeFile(path.join(outDir, "plan.json"), `${JSON.stringify(plan, null, 2)}\n`);
     process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
-  } else if (mode === "skills-prompts") {
-    const res = await packageSkillsPromptsBundle(repoRoot, path.join(outDir, "bundles/skills-prompts"));
+  } else if (mode === "backend") {
+    const target = flag("--target");
+    if (!target) throw new Error("--mode backend requires --target");
+    const res = await packageBackendBundle({
+      target,
+      outDir: path.join(outDir, "bundles/backend"),
+      teamhubDir: flag("--teamhub-dir") ? path.resolve(flag("--teamhub-dir")) : null,
+      nodeServicesDir: flag("--node-services-dir")
+        ? path.resolve(flag("--node-services-dir"))
+        : null,
+      skillsDir: flag("--skills-dir")
+        ? path.resolve(flag("--skills-dir"))
+        : path.join(repoRoot, "skills/builtin"),
+      computerDaemonDir: flag("--daemon-dir") ? path.resolve(flag("--daemon-dir")) : null,
+      installerDir: flag("--installer-dir")
+        ? path.resolve(flag("--installer-dir"))
+        : path.join(repoRoot, "apps/linger-installer/dist"),
+    });
     process.stdout.write(`${JSON.stringify(res, null, 2)}\n`);
   } else if (mode === "assemble-manifest") {
     const version = flag("--version");

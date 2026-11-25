@@ -40,26 +40,20 @@ afterEach(async () => {
 
 const noopLog = { info: () => {}, warn: () => {}, error: () => {} };
 
-describe("V2 signed test upgrade packs & portable feed server", () => {
-  it("derives deterministic SemVer-monotonic step versions within 0.1.10-v2test.0..7 and -test.0..7", () => {
+describe("V2 (2+1) signed test upgrade packs & portable feed server", () => {
+  it("derives deterministic SemVer-monotonic 4-step versions within 0.1.10-v2test.0..3", () => {
     const v2test = deriveStepVersions("0.1.10-v2test.0");
-    expect(v2test["step-00-baseline"]).toBe("0.1.10-v2test.0");
-    expect(v2test["step-01-web"]).toBe("0.1.10-v2test.1");
-    expect(v2test["step-02-skills-prompts"]).toBe("0.1.10-v2test.2");
-    expect(v2test["step-03-node-services"]).toBe("0.1.10-v2test.3");
-    expect(v2test["step-04-teamhub"]).toBe("0.1.10-v2test.4");
-    expect(v2test["step-05-computer-daemon"]).toBe("0.1.10-v2test.5");
-    expect(v2test["step-06-installer"]).toBe("0.1.10-v2test.6");
-    expect(v2test["step-07-rollback-faulty"]).toBe("0.1.10-v2test.7");
+    expect(v2test).toEqual({
+      "step-00-baseline": "0.1.10-v2test.0",
+      "step-01-web": "0.1.10-v2test.1",
+      "step-02-backend": "0.1.10-v2test.2",
+      "step-03-rollback-faulty": "0.1.10-v2test.3",
+    });
 
     const ordered = Object.values(v2test);
     for (let i = 1; i < ordered.length; i += 1) {
       expect(compareVersions(ordered[i]!, ordered[i - 1]!)).toBeGreaterThan(0);
     }
-
-    const legacyTest = deriveStepVersions("0.1.10-test.0");
-    expect(legacyTest["step-00-baseline"]).toBe("0.1.10-test.0");
-    expect(legacyTest["step-07-rollback-faulty"]).toBe("0.1.10-test.7");
   });
 
   it("resolves portable relative bundle paths against any feed URL while keeping https URLs intact", () => {
@@ -72,10 +66,10 @@ describe("V2 signed test upgrade packs & portable feed server", () => {
     expect(
       resolveArtifactUrl(
         "https://192.168.1.50:8443/feed/",
-        "bundles/teamhub/teamhub-darwin-arm64-abcdef123456.tar.zst",
+        "bundles/backend/backend-darwin-arm64-abcdef123456.tar.zst",
       ).toString(),
     ).toBe(
-      "https://192.168.1.50:8443/feed/bundles/teamhub/teamhub-darwin-arm64-abcdef123456.tar.zst",
+      "https://192.168.1.50:8443/feed/bundles/backend/backend-darwin-arm64-abcdef123456.tar.zst",
     );
     expect(
       resolveArtifactUrl(
@@ -85,7 +79,7 @@ describe("V2 signed test upgrade packs & portable feed server", () => {
     ).toBe("https://cdn.example.com/bundles/web/web-1234567890ab.tar.zst");
   });
 
-  it("builds all 8 signed steps, verifies exact 1-module diffs, and serves incremental updates over live HTTP feed", async () => {
+  it("builds all 4 signed 2+1 steps, verifies exact 1/3 diffs, and serves incremental updates over live HTTP feed", async () => {
     const kitDir = await makeTempDir("linger-v2-kit-");
     const home = await makeTempDir("linger-v2-home-");
     const tinyWeb = await makeTempDir("linger-v2-web-");
@@ -96,7 +90,7 @@ describe("V2 signed test upgrade packs & portable feed server", () => {
       "utf8",
     );
     await writeFile(
-      path.join(tinyInstaller, "index.mjs"),
+      path.join(tinyInstaller, "installer.js"),
       "export const v = 'base';\n",
       "utf8",
     );
@@ -113,7 +107,7 @@ describe("V2 signed test upgrade packs & portable feed server", () => {
     });
 
     expect(built.verification.ok).toBe(true);
-    expect(built.verification.stepCount).toBe(8);
+    expect(built.verification.stepCount).toBe(4);
     expect(built.verification.steps.every((s) => s.signatureVerified)).toBe(true);
 
     // Every step's minShellVersion MUST be satisfied by the 0.1.10-v2test.0 test shell!
@@ -174,23 +168,14 @@ describe("V2 signed test upgrade packs & portable feed server", () => {
       await updater.check();
       expect(updater.state().kind).toBe("failed");
 
-      // 2. Enable loopback test feed flag -> step-00-baseline downloads all 7 modules
+      // 2. Enable loopback test feed flag -> step-00-baseline downloads all 3 bundles (web + backend + node-native-deps)
       process.env.LINGER_ALLOW_LOOPBACK_TEST_FEED = "1";
       await updater.check();
       expect(updater.state()).toEqual({
         kind: "staged",
         version: "0.1.10-v2test.0",
-        changedModules: [
-          "node-native-deps",
-          "web",
-          "node-services",
-          "teamhub",
-          "computer-daemon",
-          "installer",
-          "skills-prompts",
-        ],
+        changedModules: ["node-native-deps", "web", "backend"],
       });
-      // Commit step-00 as current release
       await store.beginPending({
         appVersion: "0.1.10-v2test.0",
         releaseFile: "releases/0.1.10-v2test.0/release.json",
@@ -198,54 +183,31 @@ describe("V2 signed test upgrade packs & portable feed server", () => {
       });
       await store.commitPending();
 
-      // 3. Switch live via HTTP API to step-01-web -> ONLY web (1/7) downloads!
-      const sw1 = await fetch(`${server.feedUrl}/__test/switch?step=01`, {
-        method: "POST",
-      });
-      expect(sw1.ok).toBe(true);
-      await fetch(`${server.feedUrl}/__test/reset-log`, { method: "POST" });
-
-      await updater.check();
-      expect(updater.state()).toEqual({
-        kind: "staged",
-        version: "0.1.10-v2test.1",
-        changedModules: ["web"],
-      });
-      const step1Downloads = server
-        .getDownloadHistory()
-        .filter((h) => h.path.startsWith("/bundles/"));
-      expect(step1Downloads).toHaveLength(1);
-      expect(step1Downloads[0]?.path).toMatch(/^\/bundles\/web\/web-/);
-
-      // 4. Commit step-01..07 sequentially to verify each step downloads strictly 1/7 bundle!
+      // 3. Switch live through step-01 (web), step-02 (backend), step-03 (faulty backend):
+      //    each step MUST download strictly 1/3 bundle (0B for the other 2)!
       for (const [stepNum, expectedVersion, expectedMod] of [
         ["01", "0.1.10-v2test.1", "web"],
-        ["02", "0.1.10-v2test.2", "skills-prompts"],
-        ["03", "0.1.10-v2test.3", "node-services"],
-        ["04", "0.1.10-v2test.4", "teamhub"],
-        ["05", "0.1.10-v2test.5", "computer-daemon"],
-        ["06", "0.1.10-v2test.6", "installer"],
-        ["07", "0.1.10-v2test.7", "teamhub"],
+        ["02", "0.1.10-v2test.2", "backend"],
+        ["03", "0.1.10-v2test.3", "backend"],
       ] as const) {
-        if (stepNum !== "01") {
-          const sw = await fetch(
-            `${server.feedUrl}/__test/switch?step=${stepNum}`,
-            { method: "POST" },
-          );
-          expect(sw.ok).toBe(true);
-          await fetch(`${server.feedUrl}/__test/reset-log`, { method: "POST" });
-          await updater.check();
-          expect(updater.state()).toEqual({
-            kind: "staged",
-            version: expectedVersion,
-            changedModules: [expectedMod],
-          });
-          const dl = server
-            .getDownloadHistory()
-            .filter((h) => h.path.startsWith("/bundles/"));
-          expect(dl).toHaveLength(1);
-          expect(dl[0]?.path).toContain(`/bundles/${expectedMod}/`);
-        }
+        const sw = await fetch(
+          `${server.feedUrl}/__test/switch?step=${stepNum}`,
+          { method: "POST" },
+        );
+        expect(sw.ok).toBe(true);
+        await fetch(`${server.feedUrl}/__test/reset-log`, { method: "POST" });
+        await updater.check();
+        expect(updater.state()).toEqual({
+          kind: "staged",
+          version: expectedVersion,
+          changedModules: [expectedMod],
+        });
+        const dl = server
+          .getDownloadHistory()
+          .filter((h) => h.path.startsWith("/bundles/"));
+        expect(dl).toHaveLength(1);
+        expect(dl[0]?.path).toContain(`/bundles/${expectedMod}/`);
+
         await store.beginPending({
           appVersion: expectedVersion,
           releaseFile: `releases/${expectedVersion}/release.json`,
@@ -254,9 +216,9 @@ describe("V2 signed test upgrade packs & portable feed server", () => {
         await store.commitPending();
       }
 
-      // Confirm step-07 descriptor carries rollbackSafe: false
-      const step7Desc = await store.readRelease("0.1.10-v2test.7");
-      expect(step7Desc?.compat.rollbackSafe).toBe(false);
+      // Confirm step-03 descriptor carries rollbackSafe: false
+      const step3Desc = await store.readRelease("0.1.10-v2test.3");
+      expect(step3Desc?.compat.rollbackSafe).toBe(false);
 
       await host.stop("quit");
     } finally {

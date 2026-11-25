@@ -25,7 +25,6 @@ export interface RollbackNotice {
 export interface ReleaseOrchestratorHooks {
   readonly activeOperations: () => number;
   readonly isVoiceIdle?: () => Promise<boolean>;
-  readonly hotReloadSkills?: (release: LocalReleaseDescriptor) => Promise<void>;
   readonly hotReloadWeb?: (release: LocalReleaseDescriptor) => Promise<void>;
   readonly backupDatabase?: (appVersion: string) => Promise<string>;
   readonly restoreDatabase?: (backupFile: string) => Promise<void>;
@@ -65,19 +64,13 @@ export type OrchestratorState =
       readonly notice: RollbackNotice;
     };
 
-const ALL_MODULES: readonly BundleModuleId[] = [
-  "web",
-  "node-services",
-  "teamhub",
-  "computer-daemon",
-  "installer",
-  "skills-prompts",
-];
+const ALL_MODULES: readonly BundleModuleId[] = ["web", "backend"];
 
 /**
- * Computes the minimal set of changed modules between two release descriptors
- * and derives the smallest disruption update scope (0-downtime skills/web hot
- * reload vs tiered backend service restart).
+ * Computes the minimal set of changed modules between two 2+1 release descriptors
+ * and derives one of two clean update paths:
+ *   - web-only (with unchanged nodeDeps): 0-downtime static-host hot reload (`scope: "web"`)
+ *   - backend or nodeDeps changed: atomic backend drain + rolling restart/rollback (`scope: "backend"`)
  */
 export function diffReleaseModules(
   current: LocalReleaseDescriptor | undefined,
@@ -92,25 +85,12 @@ export function diffReleaseModules(
   const nodeDepsChanged =
     !current || current.infra.nodeDeps !== next.infra.nodeDeps;
 
-  const onlySkills =
+  const onlyWeb =
     !nodeDepsChanged &&
-    changed.length > 0 &&
-    changed.every((m) => m === "skills-prompts");
-  const onlyWebOrSkills =
-    !nodeDepsChanged &&
-    changed.length > 0 &&
-    changed.every((m) => m === "web" || m === "skills-prompts");
+    changed.length === 1 &&
+    changed[0] === "web";
 
-  if (onlySkills) {
-    return {
-      changedModules: changed,
-      nodeDepsChanged,
-      scope: "skills",
-      action: "reload-page",
-      requiresDrain: false,
-    };
-  }
-  if (onlyWebOrSkills) {
+  if (onlyWeb) {
     return {
       changedModules: changed,
       nodeDepsChanged,
@@ -122,7 +102,7 @@ export function diffReleaseModules(
   return {
     changedModules: changed,
     nodeDepsChanged,
-    scope: "app",
+    scope: "backend",
     action: "restart-services",
     requiresDrain: true,
   };
@@ -131,7 +111,7 @@ export function diffReleaseModules(
 /**
  * Coordinates safe V2 bundle transitions:
  *   - Drains active ComputerDaemon tasks & voice recordings before backend restarts
- *   - Applies 0-downtime hot swaps for `skills-prompts` and `web`
+ *   - Applies 0-downtime hot swaps for `web`-only updates
  *   - Protects non-rollbackSafe DB migrations with pre-migration `pg_dump`
  *   - Enforces HealthWatchdog 60s probe gate + 2-min crash rollback & denylist
  */
@@ -192,12 +172,6 @@ export class ReleaseOrchestratorModule implements Module {
       const current = await store.currentRelease();
       const diff = diffReleaseModules(current, next);
       this.#stagedVersion = appVersion;
-
-      // Zero-downtime skills-only updates apply silently immediately.
-      if (diff.scope === "skills" && this.#hooks.hotReloadSkills) {
-        await this.#applyVersion(appVersion);
-        return;
-      }
       this.#setState({ kind: "ready", version: appVersion, diff });
     })();
     this.#stagingPromise = task.finally(() => {
@@ -239,7 +213,7 @@ export class ReleaseOrchestratorModule implements Module {
     try {
       if (
         !next.compat.rollbackSafe &&
-        diff.changedModules.includes("teamhub") &&
+        diff.scope === "backend" &&
         this.#hooks.backupDatabase
       ) {
         dbBackupFile = await this.#hooks.backupDatabase(version);
@@ -252,19 +226,15 @@ export class ReleaseOrchestratorModule implements Module {
         ...(dbBackupFile ? { dbBackupFile } : {}),
       });
 
-      if (diff.scope === "skills" && this.#hooks.hotReloadSkills) {
-        await this.#hooks.hotReloadSkills(next);
-      } else if (diff.scope === "web" && this.#hooks.hotReloadWeb) {
-        if (
-          diff.changedModules.includes("skills-prompts") &&
-          this.#hooks.hotReloadSkills
-        ) {
-          await this.#hooks.hotReloadSkills(next);
-        }
+      if (diff.scope === "web" && this.#hooks.hotReloadWeb) {
         await this.#hooks.hotReloadWeb(next);
         ctx.bus.emit("web.reload_ready", version);
       } else {
         await this.#hooks.restartServices(next, diff.changedModules);
+        if (diff.changedModules.includes("web") && this.#hooks.hotReloadWeb) {
+          await this.#hooks.hotReloadWeb(next);
+          ctx.bus.emit("web.reload_ready", version);
+        }
       }
 
       const probes = this.#hooks.buildHealthProbes(next, diff.changedModules);

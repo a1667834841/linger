@@ -1,9 +1,9 @@
-name: V2 Signed Test Pack (Non-Release Artifacts)
+name: V2 Signed Test Pack (2+1 Non-Release Artifacts)
 
 # Builds signed 3-platform baseline installers (macOS arm64, Windows x64,
-# Linux x64) PLUS signed per-service V2 incremental upgrade packs
-# (step-00-baseline through step-07-rollback-faulty) and a zero-dependency
-# local test feed server (`serve-test-feed.mjs`) for real-device E2E testing.
+# Linux x64) PLUS the 2+1 V2 signed incremental upgrade kit
+# (step-00-baseline through step-03-rollback-faulty: web + unified backend +
+# cached node-native-deps) and zero-dependency `serve-test-feed.mjs`.
 #
 # SAFETY GUARANTEE:
 #   - Triggered ONLY by manual `workflow_dispatch` or `workflow_call` from
@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       base_version:
-        description: Baseline test version (e.g. 0.1.10-v2test.0; steps 01-07 derive 0.1.10-v2test.1..0.1.10-v2test.7)
+        description: Baseline test version (e.g. 0.1.10-v2test.0; steps 01-03 derive 0.1.10-v2test.1..0.1.10-v2test.3)
         type: string
         required: true
         default: "0.1.10-v2test.0"
@@ -242,14 +242,15 @@ jobs:
           scripts/ci/windows-desktop-smoke.ps1 -Setup $setup -ExpectedSha256 $digest
 
   # -------------------------------------------------------------------------
-  # Output 2: Per-Service Signed Upgrade Packs (step-00..step-07) + Feed Server
+  # Output 2: 2+1 Signed Upgrade Kit (step-00..step-03) + Local Test Feed Server
   # Compiles real web/installer/node-services/teamhub/computer-daemon/faulty-go
-  # artifacts for all 3 targets, signs macOS Mach-O binaries with rcodesign and
-  # Windows .exe binaries with osslsigncode, and Ed25519-signs every Schema 3
-  # app-manifest.json with DESKTOP_UPDATE_KEY_PEM (matching built-in UPDATE_PUBLIC_KEY).
+  # payloads for all 3 targets, signs macOS Mach-O binaries with rcodesign and
+  # Windows .exe binaries with osslsigncode, packs unified atomic `backend`
+  # bundles, and Ed25519-signs every Schema 3 app-manifest.json with
+  # DESKTOP_UPDATE_KEY_PEM (matching built-in UPDATE_PUBLIC_KEY).
   # -------------------------------------------------------------------------
   build-service-upgrade-packs:
-    name: per-service signed upgrade packs (step-00..step-07)
+    name: 2+1 signed upgrade packs (step-00..step-03)
     needs: prepare
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -282,7 +283,7 @@ jobs:
           sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 update -q &&
             sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 install -y -q osslsigncode
 
-      - name: Build real noarch & 3-platform Go payloads for step-00..step-07
+      - name: Build real 2+1 payloads for step-00..step-03
         shell: bash
         env:
           BASE_VERSION: ${{ needs.prepare.outputs.version }}
@@ -290,19 +291,19 @@ jobs:
           set -euo pipefail
           stage="$RUNNER_TEMP/v2-stage"
           rm -rf "$stage"
-          mkdir -p "$stage"/{teamhub-v0,teamhub-v4,teamhub-faulty,daemon-v0,daemon-v5,teamhub-cli,node-services,node-native-deps}
+          mkdir -p "$stage"/{teamhub-v0,teamhub-v2,teamhub-faulty,daemon-v0,daemon-v2,teamhub-cli,node-services}
 
-          echo "==> 1/5 Building @linger/web assets"
+          echo "==> 1/4 Building @linger/web assets"
           pnpm --filter @linger/web run build:assets --skip-precompress
 
-          echo "==> 2/5 Building @linger/linger-installer & @linger/teamhub-cli"
+          echo "==> 2/4 Building @linger/linger-installer & @linger/teamhub-cli"
           node apps/linger-installer/scripts/build.mjs
           node apps/teamhub-cli/scripts/build-cli.mjs --outdir "$stage/teamhub-cli"
           cp apps/desktop/scripts/teamhub.sh "$stage/teamhub-cli/teamhub"
           chmod +x "$stage/teamhub-cli/teamhub"
           printf '@echo off\r\nsetlocal\r\nset "app=%%~dp0..\\..\\..\\..\\Linger.exe"\r\nif not exist "%%app%%" set "app=node"\r\nset ELECTRON_RUN_AS_NODE=1\r\n"%%app%%" --use-env-proxy "%%~dp0teamhub.js" %%*\r\n' >"$stage/teamhub-cli/teamhub.cmd"
 
-          echo "==> 3/5 Building node-services (when present in checkout)"
+          echo "==> 3/4 Building node-services (when present in checkout)"
           if [ -d apps/node-services/src ] && [ -d apps/voice-runtime/src ]; then
             node apps/desktop/scripts/bundle-node-services.mjs "$PWD" "$stage/node-services"
             if [ -d apps/node-services/prompts ]; then
@@ -313,13 +314,11 @@ jobs:
             rm -rf "$stage/node-services"
           fi
 
-          echo "==> 4/5 Cross-compiling TeamHub & Computer Daemon for darwin-arm64, win32-x64, linux-x64"
-          # Compute step-04 & step-05 derived versions for embedded Go ldflags
-          ver_v4=$(node -e 'const {deriveStepVersions}=require("./apps/desktop/scripts/build-v2-test-upgrade-packs.mjs"); console.log(deriveStepVersions(process.argv[1])["step-04-teamhub"])' "$BASE_VERSION" 2>/dev/null || node --input-type=module -e 'import {deriveStepVersions} from "./apps/desktop/scripts/build-v2-test-upgrade-packs.mjs"; console.log(deriveStepVersions(process.argv[1])["step-04-teamhub"])' "$BASE_VERSION")
-          ver_v5=$(node --input-type=module -e 'import {deriveStepVersions} from "./apps/desktop/scripts/build-v2-test-upgrade-packs.mjs"; console.log(deriveStepVersions(process.argv[1])["step-05-computer-daemon"])' "$BASE_VERSION")
-          ver_v7=$(node --input-type=module -e 'import {deriveStepVersions} from "./apps/desktop/scripts/build-v2-test-upgrade-packs.mjs"; console.log(deriveStepVersions(process.argv[1])["step-07-rollback-faulty"])' "$BASE_VERSION")
+          echo "==> 4/4 Cross-compiling TeamHub & Computer Daemon for darwin-arm64, win32-x64, linux-x64"
+          ver_backend=$(node --input-type=module -e 'import {deriveStepVersions} from "./apps/desktop/scripts/build-v2-test-upgrade-packs.mjs"; console.log(deriveStepVersions(process.argv[1])["step-02-backend"])' "$BASE_VERSION")
+          ver_faulty=$(node --input-type=module -e 'import {deriveStepVersions} from "./apps/desktop/scripts/build-v2-test-upgrade-packs.mjs"; console.log(deriveStepVersions(process.argv[1])["step-03-rollback-faulty"])' "$BASE_VERSION")
 
-          # Prepare tiny native Go binary for step-07-rollback-faulty (crashes cleanly with exit 42 on all 3 OSes)
+          # Native Go crashing binary for step-03-rollback-faulty (exit 42 on all 3 OSes)
           faulty_src="$RUNNER_TEMP/faulty-teamhub"
           mkdir -p "$faulty_src"
           cat >"$faulty_src/go.mod" <<'GOMOD'
@@ -335,7 +334,7 @@ jobs:
           )
 
           func main() {
-          	fmt.Fprintf(os.Stderr, "[V2-TEST-FAULTY-${ver_v7}] intentional startup crash to verify pg_dump/pg_restore + automatic rollback + denylist\\n")
+          	fmt.Fprintf(os.Stderr, "[V2-TEST-FAULTY-${ver_faulty}] intentional startup crash to verify pg_dump/pg_restore + atomic rollback + denylist\\n")
           	os.Exit(42)
           }
           EOF
@@ -349,10 +348,9 @@ jobs:
             ext=""
             [ "$goos" = "windows" ] && ext=".exe"
 
-            mkdir -p "$stage/teamhub-v0/$target" "$stage/teamhub-v4/$target" "$stage/teamhub-faulty/$target"
-            mkdir -p "$stage/daemon-v0/$target" "$stage/daemon-v5/$target"
+            mkdir -p "$stage/teamhub-v0/$target" "$stage/teamhub-v2/$target" "$stage/teamhub-faulty/$target"
+            mkdir -p "$stage/daemon-v0/$target" "$stage/daemon-v2/$target"
 
-            # TeamHub baseline (step-00) & upgraded (step-04)
             (
               cd apps/teamhub
               for cmd in teamhub migrate account; do
@@ -360,17 +358,15 @@ jobs:
                   go build -trimpath -ldflags "-s -w" \
                   -o "$stage/teamhub-v0/$target/${cmd}${ext}" "./cmd/${cmd}"
               done
-              # Step-04 distinct build ID so binary bytes differ cleanly from baseline
               for cmd in teamhub migrate account; do
                 CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" GOFLAGS="-buildvcs=false" \
-                  go build -trimpath -ldflags "-s -w -buildid=linger-v2-${ver_v4}/${target}/${cmd}" \
-                  -o "$stage/teamhub-v4/$target/${cmd}${ext}" "./cmd/${cmd}"
+                  go build -trimpath -ldflags "-s -w -buildid=linger-v2-${ver_backend}/${target}/${cmd}" \
+                  -o "$stage/teamhub-v2/$target/${cmd}${ext}" "./cmd/${cmd}"
               done
             )
 
-            # Step-07 faulty native teamhub + real migrate/account
-            cp "$stage/teamhub-v4/$target/migrate${ext}" "$stage/teamhub-faulty/$target/migrate${ext}"
-            cp "$stage/teamhub-v4/$target/account${ext}" "$stage/teamhub-faulty/$target/account${ext}"
+            cp "$stage/teamhub-v2/$target/migrate${ext}" "$stage/teamhub-faulty/$target/migrate${ext}"
+            cp "$stage/teamhub-v2/$target/account${ext}" "$stage/teamhub-faulty/$target/account${ext}"
             (
               cd "$faulty_src"
               CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" GOFLAGS="-buildvcs=false" \
@@ -378,7 +374,6 @@ jobs:
                 -o "$stage/teamhub-faulty/$target/teamhub${ext}" .
             )
 
-            # Computer Daemon baseline (step-00) & upgraded (step-05)
             (
               cd apps/computer/local-daemon
               CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" GOFLAGS="-buildvcs=false" \
@@ -387,12 +382,12 @@ jobs:
                 -o "$stage/daemon-v0/$target/linger-computer-daemon${ext}" ./cmd/linger-computer-daemon
               CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" GOFLAGS="-buildvcs=false" \
                 go build -trimpath \
-                -ldflags "-s -w -X github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/transport.ReleaseVersion=${ver_v5}" \
-                -o "$stage/daemon-v5/$target/linger-computer-daemon${ext}" ./cmd/linger-computer-daemon
+                -ldflags "-s -w -X github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/transport.ReleaseVersion=${ver_backend}" \
+                -o "$stage/daemon-v2/$target/linger-computer-daemon${ext}" ./cmd/linger-computer-daemon
             )
           done
 
-      - name: Sign macOS (rcodesign) and Windows (osslsigncode) binaries in upgrade packs
+      - name: Sign macOS (rcodesign) and Windows (osslsigncode) binaries in unified backend packs
         shell: bash
         env:
           MACOS_DEVELOPER_ID_P12_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}
@@ -413,14 +408,14 @@ jobs:
               "$stage/teamhub-v0/darwin-arm64/teamhub" \
               "$stage/teamhub-v0/darwin-arm64/migrate" \
               "$stage/teamhub-v0/darwin-arm64/account" \
-              "$stage/teamhub-v4/darwin-arm64/teamhub" \
-              "$stage/teamhub-v4/darwin-arm64/migrate" \
-              "$stage/teamhub-v4/darwin-arm64/account" \
+              "$stage/teamhub-v2/darwin-arm64/teamhub" \
+              "$stage/teamhub-v2/darwin-arm64/migrate" \
+              "$stage/teamhub-v2/darwin-arm64/account" \
               "$stage/teamhub-faulty/darwin-arm64/teamhub" \
               "$stage/teamhub-faulty/darwin-arm64/migrate" \
               "$stage/teamhub-faulty/darwin-arm64/account" \
               "$stage/daemon-v0/darwin-arm64/linger-computer-daemon" \
-              "$stage/daemon-v5/darwin-arm64/linger-computer-daemon"; do
+              "$stage/daemon-v2/darwin-arm64/linger-computer-daemon"; do
               echo "rcodesign: signing $(basename "$bin") ($(dirname "$bin"))"
               "$RCODESIGN" sign \
                 --p12-file "$keys/developer-id.p12" \
@@ -438,14 +433,14 @@ jobs:
               "$stage/teamhub-v0/win32-x64/teamhub.exe" \
               "$stage/teamhub-v0/win32-x64/migrate.exe" \
               "$stage/teamhub-v0/win32-x64/account.exe" \
-              "$stage/teamhub-v4/win32-x64/teamhub.exe" \
-              "$stage/teamhub-v4/win32-x64/migrate.exe" \
-              "$stage/teamhub-v4/win32-x64/account.exe" \
+              "$stage/teamhub-v2/win32-x64/teamhub.exe" \
+              "$stage/teamhub-v2/win32-x64/migrate.exe" \
+              "$stage/teamhub-v2/win32-x64/account.exe" \
               "$stage/teamhub-faulty/win32-x64/teamhub.exe" \
               "$stage/teamhub-faulty/win32-x64/migrate.exe" \
               "$stage/teamhub-faulty/win32-x64/account.exe" \
               "$stage/daemon-v0/win32-x64/linger-computer-daemon.exe" \
-              "$stage/daemon-v5/win32-x64/linger-computer-daemon.exe"; do
+              "$stage/daemon-v2/win32-x64/linger-computer-daemon.exe"; do
               echo "osslsigncode: signing $(basename "$exe") ($(dirname "$exe"))"
               osslsigncode sign \
                 -pkcs12 "$keys/authenticode.p12" \
@@ -456,7 +451,7 @@ jobs:
             done
           fi
 
-      - name: Assemble, Ed25519-sign, and verify all 8 steps (step-00..step-07)
+      - name: Assemble, Ed25519-sign, and verify all 4 steps (step-00..step-03)
         shell: bash
         env:
           BASE_VERSION: ${{ needs.prepare.outputs.version }}
@@ -490,10 +485,10 @@ jobs:
             --web-dist apps/web/dist \
             --installer-dist apps/linger-installer/dist \
             --teamhub-dir "$stage/teamhub-v0" \
-            --teamhub-v2-dir "$stage/teamhub-v4" \
+            --teamhub-v2-dir "$stage/teamhub-v2" \
             --teamhub-faulty-dir "$stage/teamhub-faulty" \
             --daemon-dir "$stage/daemon-v0" \
-            --daemon-v2-dir "$stage/daemon-v5" \
+            --daemon-v2-dir "$stage/daemon-v2" \
             --teamhub-cli-dir "$stage/teamhub-cli" \
             --macos-signed "$MACOS_SIGNED" \
             --windows-signed "$WINDOWS_SIGNED" \
@@ -512,8 +507,9 @@ jobs:
             import fs from "node:fs";
             const idx = JSON.parse(fs.readFileSync(".linger-runtime/v2-test-service-upgrade-packs/manifest-index.json", "utf8"));
             const lines = [
-              "## Linger V2 Signed Test Pack (Non-Release Artifacts Only)",
+              "## Linger V2 (2+1) Signed Test Pack — Non-Release Artifacts Only",
               "",
+              `- **Architecture**: \`2+1\` (\`web\` + unified \`backend\` + cached \`node-native-deps\`)`,
               `- **Baseline Version**: \`${idx.baseVersion}\``,
               `- **Ed25519 Signing**: \`${idx.signedWith}\``,
               `- **macOS Binary Signing**: \`${idx.macosSigned}\``,
@@ -524,12 +520,12 @@ jobs:
               "1. \`v2-test-installer-macos-arm64\` (signed + notarized DMG & .app.tar.gz)",
               "2. \`v2-test-installer-windows-x64\` (Authenticode signed Setup EXE & portable ZIP)",
               "3. \`v2-test-installer-linux-x64\` (Linux x64 tar.gz)",
-              "4. \`v2-test-service-upgrade-packs\` (all 8 steps + \`serve-test-feed.mjs\` + \`REAL-DEVICE-TEST-GUIDE.md\`)",
+              "4. \`v2-test-service-upgrade-packs\` (4-step 2+1 upgrade kit + \`serve-test-feed.mjs\` + \`REAL-DEVICE-TEST-GUIDE.md\`)",
               "",
-              "### Per-Service Upgrade Steps",
+              "### 4-Step 2+1 Upgrade Matrix",
               "| Step | Version | Changed Module(s) | Inherited | Rollback Safe | Signed |",
               "|---|---|---|---|---|---|",
-              ...idx.steps.map(s => `| \`${s.id}\` | \`${s.appVersion}\` | \`${s.changedModules.join(", ")}\` | ${s.inheritedModules.length}/7 | ${s.rollbackSafe} | ${s.signed} |`),
+              ...idx.steps.map(s => `| \`${s.id}\` | \`${s.appVersion}\` | \`${s.changedModules.join(", ")}\` | ${s.inheritedModules.length}/3 | ${s.rollbackSafe} | ${s.signed} |`),
             ];
             fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n");
           '

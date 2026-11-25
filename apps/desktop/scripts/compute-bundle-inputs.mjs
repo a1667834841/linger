@@ -22,12 +22,8 @@ const defaultRepoRoot = path.resolve(
 
 export const BUNDLE_IDS = Object.freeze([
   "web",
-  "node-services",
+  "backend",
   "node-native-deps",
-  "teamhub",
-  "computer-daemon",
-  "installer",
-  "skills-prompts",
 ]);
 
 export const PLATFORM_TARGETS = Object.freeze([
@@ -36,7 +32,10 @@ export const PLATFORM_TARGETS = Object.freeze([
   "linux-x64",
 ]);
 
-// Source ownership table aligned with pnpm-workspace.yaml & go.mod dependency graph.
+// Source ownership table for the 2+1 bundle architecture:
+//   - web (noarch): frontend SPA + static-host
+//   - backend (per-target): unified atomic backend (teamhub + node-services/voice-runtime + skills/prompts + computer-daemon/teamhub-cli + installer)
+//   - node-native-deps (per-target): cached external native node_modules
 // Changes outside a bundle's owned paths never invalidate its inputHash.
 export const BUNDLE_INPUT_SPECS = Object.freeze({
   web: {
@@ -56,24 +55,56 @@ export const BUNDLE_INPUT_SPECS = Object.freeze({
       /\.(?:test|spec)\.[cm]?[jt]sx?$/,
     ],
   },
-  "node-services": {
-    arch: "noarch",
+  backend: {
+    arch: "per-target",
     paths: [
+      "apps/teamhub/cmd/teamhub",
+      "apps/teamhub/cmd/migrate",
+      "apps/teamhub/cmd/account",
+      "apps/teamhub/internal",
+      "apps/teamhub/migrations",
+      "apps/teamhub/go.mod",
+      "apps/teamhub/go.sum",
       "apps/node-services/src",
+      "apps/node-services/prompts",
       "apps/node-services/scripts/dev-supervisor.ts",
       "apps/node-services/package.json",
       "apps/voice-runtime/src",
       "apps/voice-runtime/package.json",
+      "apps/computer/local-daemon",
+      "apps/computer/package.json",
+      "apps/computer/tools",
+      "apps/computer/scripts",
+      "apps/teamhub-cli/src",
+      "apps/teamhub-cli/scripts",
+      "apps/teamhub-cli/bin",
+      "apps/teamhub-cli/package.json",
+      "apps/linger-installer/src",
+      "apps/linger-installer/scripts",
+      "apps/linger-installer/package.json",
+      "packages/local-installation/src",
+      "packages/local-installation/package.json",
       "packages/document-files",
       "packages/document-model",
       "packages/knowledge-format",
       "packages/service-kit",
+      "contracts/generated/go",
       "contracts/generated/typescript",
+      "skills/embed.go",
+      "skills/go.mod",
+      "skills/builtin",
+      "apps/desktop/scripts/build-teamhub.mjs",
+      "apps/desktop/scripts/build-daemon.mjs",
       "apps/desktop/scripts/bundle-node-services.mjs",
       "patches/@hocuspocus__server@4.3.0.patch",
       "patches/deepagents@1.12.0.patch",
+      "patches/playwright-core@1.64.0-alpha-1790635538000.patch",
     ],
-    exclude: [/(?:^|\/)__tests__\//, /\.(?:test|spec)\.[cm]?[jt]sx?$/],
+    exclude: [
+      /_test\.go$/,
+      /(?:^|\/)__tests__\//,
+      /\.(?:test|spec)\.[cm]?[jt]sx?$/,
+    ],
   },
   "node-native-deps": {
     arch: "per-target",
@@ -85,66 +116,6 @@ export const BUNDLE_INPUT_SPECS = Object.freeze({
     ],
     exclude: [],
     usesNativeDepsLock: true,
-  },
-  teamhub: {
-    arch: "per-target",
-    paths: [
-      "apps/teamhub/cmd/teamhub",
-      "apps/teamhub/cmd/migrate",
-      "apps/teamhub/cmd/account",
-      "apps/teamhub/internal",
-      "apps/teamhub/migrations",
-      "apps/teamhub/go.mod",
-      "apps/teamhub/go.sum",
-      "contracts/generated/go",
-      "skills/embed.go",
-      "skills/go.mod",
-      "skills/builtin",
-      "apps/desktop/scripts/build-teamhub.mjs",
-    ],
-    exclude: [/_test\.go$/, /^contracts\/generated\/go\/runnergateway\//],
-  },
-  "computer-daemon": {
-    arch: "per-target",
-    paths: [
-      "apps/computer/local-daemon",
-      "apps/computer/package.json",
-      "apps/computer/tools",
-      "apps/computer/scripts",
-      "apps/teamhub-cli/src",
-      "apps/teamhub-cli/scripts",
-      "apps/teamhub-cli/bin",
-      "apps/teamhub-cli/package.json",
-      "packages/document-files",
-      "packages/service-kit",
-      "contracts/generated/go/runnergateway",
-      "contracts/generated/typescript",
-      "patches/playwright-core@1.64.0-alpha-1790635538000.patch",
-      "apps/desktop/scripts/build-daemon.mjs",
-    ],
-    exclude: [
-      /_test\.go$/,
-      /(?:^|\/)__tests__\//,
-      /\.(?:test|spec)\.[cm]?[jt]sx?$/,
-    ],
-  },
-  installer: {
-    arch: "noarch",
-    paths: [
-      "apps/linger-installer/src",
-      "apps/linger-installer/scripts",
-      "apps/linger-installer/package.json",
-      "packages/local-installation/src",
-      "packages/local-installation/package.json",
-      "packages/service-kit",
-      "contracts/generated/typescript",
-    ],
-    exclude: [/(?:^|\/)__tests__\//, /\.(?:test|spec)\.[cm]?[jt]sx?$/],
-  },
-  "skills-prompts": {
-    arch: "noarch",
-    paths: ["skills/builtin", "apps/node-services/prompts"],
-    exclude: [],
   },
 });
 
@@ -314,7 +285,7 @@ export function computeBundleInputHash(
   }
 
   let nativeDepsInfo = null;
-  if (spec.usesNativeDepsLock || bundleId === "node-services") {
+  if (spec.usesNativeDepsLock || bundleId === "backend") {
     const lock =
       lockfileText ??
       (existsSync(path.join(repoRoot, "pnpm-lock.yaml"))
@@ -378,7 +349,7 @@ export function planBundleBuilds(
     const sameInput =
       prevEntry !== undefined &&
       prevEntry.inputHash === computed.inputHash &&
-      (bundleId !== "node-services" ||
+      (bundleId !== "backend" ||
         prevEntry.nativeDepsHash === globalNativeDeps.hash) &&
       (spec.arch === "noarch"
         ? Boolean(prevEntry.artifact?.sha256)
@@ -390,7 +361,7 @@ export function planBundleBuilds(
       action: sameInput ? "REUSED" : "BUILD",
       inputHash: computed.inputHash,
       fileCount: computed.fileCount,
-      ...(bundleId === "node-services" || bundleId === "node-native-deps"
+      ...(bundleId === "backend" || bundleId === "node-native-deps"
         ? {
             nativeDepsHash: globalNativeDeps.hash,
             nativeDepsShortId: globalNativeDeps.shortId,
