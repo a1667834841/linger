@@ -69,7 +69,11 @@ export function CustomMCPSection({
                 </p>
               )}
             </div>
-            <Button size="compact" onClick={() => onEdit(connection)}>
+            <Button
+              size="compact"
+              data-voice-risk="confirm"
+              onClick={() => onEdit(connection)}
+            >
               {t(
                 connection.authorization_status ===
                   "reauthorization_required" ||
@@ -266,6 +270,7 @@ export function CustomMCPDialog({
           <Button onClick={onClose}>{t(commonMessages.cancel)}</Button>
           <Button
             tone="primary"
+            data-voice-risk={oauth ? "confirm" : undefined}
             disabled={
               pending ||
               !name.trim() ||
