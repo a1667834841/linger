@@ -16,4 +16,16 @@ export const teamHubErrorMessages = defineMessages("teamHubErrors", {
     "The server could not complete this request ({status}). Try again.",
   unreachable:
     "Couldn't reach the server. Check your connection and try again.",
+  customMcpOAuthRequired: "The MCP server requires OAuth authorization.",
+  customMcpReauthorizationRequired: "Authorize the MCP connector again.",
+  customMcpOAuthMetadataInvalid:
+    "The MCP server did not provide a supported OAuth configuration.",
+  customMcpOAuthResponseInvalid:
+    "The authorization server did not complete authorization.",
+  customMcpOAuthStateInvalid:
+    "The authorization attempt is invalid or has expired.",
+  customMcpOAuthRegistrationRequired:
+    "Enter credentials for a registered OAuth client.",
+  customMcpOAuthBindingChanged:
+    "The authorization server changed. Refresh the connector and authorize again.",
 });

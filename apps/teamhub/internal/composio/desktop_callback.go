@@ -25,3 +25,9 @@ func WithDesktopOAuthCallback(ctx context.Context, callback *string) (context.Co
 	}
 	return nil, errors.New("invalid desktop OAuth callback")
 }
+
+// DesktopOAuthCallback returns the validated loopback redirect URI, if supplied.
+func DesktopOAuthCallback(ctx context.Context) string {
+	callback, _ := ctx.Value(desktopCallbackKey{}).(string)
+	return callback
+}

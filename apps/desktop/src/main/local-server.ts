@@ -1642,6 +1642,17 @@ export class LocalServerModule implements Module {
     return { check, reasonLog };
   }
 
+  // The installer passes this environment to the TeamHub it starts. Desktop's
+  // TeamHub serves only this computer, so custom MCP may reach local servers.
+  #installerEnv(home: string, proxyEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+    return {
+      ...this.#daemonEnv(),
+      ...proxyEnv,
+      LINGER_HOME: home,
+      TEAMHUB_CUSTOM_MCP_NETWORK: "local",
+    };
+  }
+
   // Logs how long one part of setup took, so a slow setup says which part.
   async #timed<T>(
     step: string,
@@ -3915,7 +3926,7 @@ export class LocalServerModule implements Module {
         // A detached Windows process otherwise opens its own console window.
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...this.#daemonEnv(), ...proxyEnv, LINGER_HOME: home },
+        env: this.#installerEnv(home, proxyEnv),
       },
     );
     const log = this.#ctx?.log;
@@ -4480,11 +4491,7 @@ export class LocalServerModule implements Module {
       stage: "ensure_node",
       ms: Date.now() - nodeStartedAt,
     });
-    const env = {
-      ...this.#daemonEnv(),
-      ...(await proxyEnv),
-      LINGER_HOME: record.home,
-    };
+    const env = this.#installerEnv(record.home, await proxyEnv);
     onStage?.("installer_resume");
     const resumeStartedAt = Date.now();
     const outcome = await new Promise<ResumeOutcome>((resolve, reject) => {

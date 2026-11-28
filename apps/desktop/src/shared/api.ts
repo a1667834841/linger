@@ -1,6 +1,8 @@
 // Contract between the remote SPA (through preload) and the main process.
 // The SPA detects the desktop shell with `typeof window.lingerDesktop`.
 
+import type { paths } from "@linger/wire-contracts/teamhub-public/types";
+
 import type {
   DesktopDriverActionResult,
   DesktopDriverCapabilities,
@@ -101,6 +103,9 @@ export interface PreviewViewState {
 
 export type PreviewCommand = "back" | "forward" | "reload";
 
+export type ConnectorOAuthResponse =
+  paths["/v0/custom-mcp-connections/oauth/callback"]["post"]["requestBody"]["content"]["application/json"];
+
 export interface PreviewViewApi {
   // Creates the view, hidden, or loads url in an existing one.
   open(id: string, url: string): Promise<void>;
@@ -158,7 +163,13 @@ export interface LingerDesktopApi {
   };
   readonly connectorOAuth: {
     prepare(): Promise<string>;
-    onReturn(callback: (connectedAccountId?: string) => void): () => void;
+    prepareCustomMCP(endpoint: string): Promise<string>;
+    onReturn(
+      callback: (
+        connectedAccountId?: string,
+        customMCP?: ConnectorOAuthResponse,
+      ) => void,
+    ): () => void;
   };
   readonly preview: {
     // The link preview panel's frame, named PREVIEW_FRAME_PREFIX + an id,

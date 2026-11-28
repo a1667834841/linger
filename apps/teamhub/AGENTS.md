@@ -2,6 +2,21 @@
 
 Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
 
+TeamHub uses Streamable HTTP for custom MCP. The default
+`TEAMHUB_CUSTOM_MCP_NETWORK=public` allows public addresses only. Desktop's
+local TeamHub uses `local`, which also permits loopback, private addresses,
+and shared IPv4 addresses. TeamHub checks addresses at dial time and refuses
+redirects. Bearer tokens require HTTPS except on loopback in `local` mode.
+OAuth uses the first issuer in the protected resource metadata. It supports
+dynamic registration and manual client credentials. The OAuth endpoints use
+the same network policy as the MCP endpoint. Authorization binds PKCE, the
+redirect URI, and one-time state to the signed-in owner and connector revision.
+TeamHub seals the credentials and serializes token refreshes in PostgreSQL.
+The connector reports rejected authorization and required scopes separately.
+Saving or editing a connector verifies its catalog. An explicit Agent grant
+allows discovery, and each tool call waits for the sponsor's confirmation.
+Approval rechecks the grant and the catalog revision before dispatch.
+
 ## Common Commands
 
 - `go test ./internal/<feature> -run <TestName>`: run one focused Go test from `apps/teamhub`.

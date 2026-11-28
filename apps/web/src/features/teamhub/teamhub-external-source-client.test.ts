@@ -51,6 +51,52 @@ describe("TeamHub External Source client", () => {
     }
   });
 
+  it("prepares the Desktop MCP redirect and submits the returned grant", async () => {
+    const callbackID = "a".repeat(48);
+    const redirect = "http://127.0.0.1:43210/oauth/connector/" + callbackID;
+    const prepareCustomMCP = vi.fn().mockResolvedValue(redirect);
+    vi.stubGlobal("window", {
+      lingerDesktop: { connectorOAuth: { prepareCustomMCP } },
+    });
+    try {
+      const fetchRequest = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(jsonResponse({ redirect_uri: redirect }, 200))
+        .mockResolvedValueOnce(new Response(null, { status: 204 }));
+      const client = createHttpTeamHubClient({
+        baseUrl: "https://teamhub.example.test",
+        fetchRequest,
+      });
+      const input = {
+        name: "MCP",
+        endpoint: "https://mcp.example.test/mcp",
+        redirect_only: true,
+      };
+      const grant = {
+        state: "x".repeat(43),
+        callback_id: callbackID,
+        code: "fixture-code",
+      };
+      expect(await client.startCustomMCPOAuth(input)).toEqual({
+        redirect_uri: redirect,
+      });
+      await client.completeCustomMCPOAuth(grant);
+      expect(prepareCustomMCP).toHaveBeenCalledExactlyOnceWith(input.endpoint);
+      const requests = await sentRequests(fetchRequest);
+      expect(
+        requests.map(([url]) => new URL(requestUrlText(url)).pathname),
+      ).toEqual([
+        "/v0/custom-mcp-connections/oauth/start",
+        "/v0/custom-mcp-connections/oauth/callback",
+      ]);
+      expect(
+        requests.map(([, init]) => JSON.parse(requestBodyText(init?.body))),
+      ).toEqual([{ ...input, desktop_callback_url: redirect }, grant]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("maps connection and selection pagination to V1 routes", async () => {
     const connection = connectionFixture();
     const fetchRequest = vi

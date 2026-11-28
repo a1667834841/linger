@@ -1,30 +1,44 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
+
+import type { ConnectorOAuthResponse } from "../shared/api.js";
 
 const CALLBACK_PREFIX = "/oauth/connector/";
 const CALLBACK_TTL = 15 * 60_000;
 const MAX_CALLBACKS = 32;
-type ReturnHandler = (connectedAccountId?: string) => void;
+type ReturnHandler = (
+  connectedAccountId?: string,
+  customMCP?: ConnectorOAuthResponse,
+) => void;
 
 export class ConnectorOAuth {
   #server?: Server;
   #origin?: Promise<string>;
   readonly #pending = new Map<
     string,
-    { expires: number; onReturn: ReturnHandler }
+    { expires: number; onReturn: ReturnHandler; customMCP: boolean }
   >();
 
-  async prepare(onReturn: ReturnHandler): Promise<string> {
+  async prepare(onReturn: ReturnHandler, endpoint?: string): Promise<string> {
     const origin = await (this.#origin ??= this.#listen());
     const now = Date.now();
     for (const [key, attempt] of this.#pending) {
       if (attempt.expires <= now) this.#pending.delete(key);
     }
-    if (this.#pending.size >= MAX_CALLBACKS) {
+    // Exact redirect matching requires the same path when reusing a client registration.
+    const id =
+      endpoint === undefined
+        ? randomBytes(24).toString("hex")
+        : createHash("sha256").update(endpoint).digest("hex").slice(0, 48);
+    const pathname = CALLBACK_PREFIX + id;
+    if (!this.#pending.has(pathname) && this.#pending.size >= MAX_CALLBACKS) {
       throw new Error("Too many connector authorizations in progress");
     }
-    const pathname = CALLBACK_PREFIX + randomBytes(24).toString("hex");
-    this.#pending.set(pathname, { expires: now + CALLBACK_TTL, onReturn });
+    this.#pending.set(pathname, {
+      expires: now + CALLBACK_TTL,
+      onReturn,
+      customMCP: endpoint !== undefined,
+    });
     return origin + pathname;
   }
 
@@ -52,7 +66,14 @@ export class ConnectorOAuth {
           res.writeHead(404).end("Authorization callback not found.");
           return;
         }
-        this.#pending.delete(url.pathname);
+        const response = attempt.customMCP ? customMCPResponse(url) : undefined;
+        if (attempt.customMCP && !response) {
+          res.writeHead(400).end("Invalid authorization response.");
+          return;
+        }
+        // TeamHub consumes custom MCP state atomically. Keep the stable redirect
+        // available so a second authorization for this endpoint can return.
+        if (!attempt.customMCP) this.#pending.delete(url.pathname);
         const account = url.searchParams.get("connected_account_id");
         res
           .writeHead(200, {
@@ -63,11 +84,14 @@ export class ConnectorOAuth {
           .end(
             "<!doctype html><html lang=en><meta charset=utf-8><title>Linger authorization</title><h1>Go back to Linger</h1><p>Linger received the authorization response. Check the connector status in the app. You can close this tab.</p>",
           );
-        attempt.onReturn(
-          account && /^[a-zA-Z0-9_-]{1,256}$/.test(account)
-            ? account
-            : undefined,
-        );
+        if (response) attempt.onReturn(undefined, response);
+        else {
+          attempt.onReturn(
+            account && /^[a-zA-Z0-9_-]{1,256}$/.test(account)
+              ? account
+              : undefined,
+          );
+        }
       });
       this.#server = server;
       server.once("error", reject);
@@ -88,4 +112,31 @@ export class ConnectorOAuth {
     this.#server?.close();
     this.#server?.closeAllConnections();
   }
+}
+
+function customMCPResponse(url: URL): ConnectorOAuthResponse | undefined {
+  const query = url.searchParams;
+  for (const key of ["state", "code", "iss", "error"]) {
+    const values = query.getAll(key);
+    if (values.length > 1 || values[0] === "") return undefined;
+  }
+  const state = query.get("state");
+  const code = query.get("code") ?? undefined;
+  const error = query.get("error") ?? undefined;
+  const iss = query.get("iss") ?? undefined;
+  if (
+    url.search.length > 16_384 ||
+    !state ||
+    !/^[a-zA-Z0-9_-]{43}$/.test(state) ||
+    Boolean(code) === Boolean(error)
+  ) {
+    return undefined;
+  }
+  return {
+    state,
+    code,
+    error,
+    iss,
+    callback_id: url.pathname.slice(CALLBACK_PREFIX.length),
+  };
 }

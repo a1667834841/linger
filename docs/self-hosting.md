@@ -49,6 +49,26 @@ your machine against a PostgreSQL you provide; see
 [Local PostgreSQL 17 for development](local-postgresql.md) and
 [CONTRIBUTING.md](../CONTRIBUTING.md).
 
+Self-hosted TeamHub defaults to `TEAMHUB_CUSTOM_MCP_NETWORK=public` for custom
+MCP connectors. Desktop's local TeamHub uses `local` to also reach loopback,
+private addresses, and shared IPv4 addresses.
+
+For custom MCP OAuth in a browser, set `WEB_PUBLIC_ORIGIN` to your HTTPS Linger
+origin. The browser must be signed in to that origin. The reverse proxy must
+forward `GET /v0/custom-mcp-connections/oauth/callback` and its query string to
+TeamHub. Omit the callback query string from proxy access logs because it
+contains a short-lived authorization code.
+
+Set `TEAMHUB_SECRET_ENCRYPTION_KEY` to a deployment-specific 32-byte base64
+key before storing connector credentials. Keep the same key across upgrades.
+
+If the provider needs a manually registered OAuth client, select **Use a
+registered OAuth client** and click **Show redirect URI**. Copy that URI into
+the provider's registration. Register a client that supports authorization code
+with S256 PKCE. On Desktop, register a native client that accepts variable ports
+on IPv4 loopback. Desktop binds its loopback listener to a new port after a
+restart.
+
 To collect the desktop app's diagnostics from your people, run a receiver
 for [Diagnostics upload](diagnostics-upload.md) and set its address as
 `diagnosticsUploadUrl` in each app's `config.json`.

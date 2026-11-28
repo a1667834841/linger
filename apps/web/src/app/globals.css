@@ -4824,50 +4824,40 @@ button.question-choice:focus-visible {
   box-shadow: 0 0 0 2px var(--app-ring);
 }
 
-/* Keyboard focus gets the same readable label as pointer hover, drawn as a
-   Town tooltip: inverted primary pill, 12px caption, a short ringed shadow. */
-.app-navigation[data-expanded="false"] .room-rail-link:focus-visible {
-  width: max-content;
-  padding-right: 10px;
+/* A collapsed rail button keeps its size on hover and keyboard focus; its label
+   floats beside it as a Town tooltip (inverted primary pill, 12px caption,
+   medium shadow). The label ignores the pointer, so it never takes hover away
+   from the button and cannot make the target flicker. */
+.app-navigation[data-expanded="false"] .room-rail-link {
+  overflow: visible;
+}
+.app-navigation[data-expanded="false"] .primary-navigation-label {
+  left: calc(100% + 8px);
+  padding: 4px 8px;
+  border-radius: 8px;
   background: hsl(var(--town-primary));
   color: hsl(var(--town-primary-foreground));
+  box-shadow: var(--town-shadow-md);
   font-size: 12px;
   font-weight: 400;
-  box-shadow:
-    0 0 0 2px var(--app-ring),
-    var(--town-shadow-md);
-}
-.app-navigation[data-expanded="false"] .room-rail-link:focus-visible > svg {
-  margin-inline: 8px 0;
+  line-height: 16px;
+  pointer-events: none;
+  z-index: 20;
 }
 .app-navigation[data-expanded="false"]
   .room-rail-link:focus-visible
   .primary-navigation-label {
-  position: static;
-  transform: none;
   opacity: 1;
 }
 
 @media (hover: hover) and (pointer: fine) {
-  /* Keep targets anchored: moving a hovered link or its neighbours can move
-     an edge out from under a stationary pointer and toggle hover endlessly. */
   .app-navigation[data-expanded="false"] .room-rail-link:hover {
-    width: max-content;
-    padding-right: 10px;
-    background: hsl(var(--town-primary));
-    color: hsl(var(--town-primary-foreground));
-    font-size: 12px;
-    font-weight: 400;
-    box-shadow: var(--town-shadow-md);
-  }
-  .app-navigation[data-expanded="false"] .room-rail-link:hover > svg {
-    margin-inline: 8px 0;
+    background: hsl(var(--town-sidebar-muted) / 0.6);
+    color: hsl(var(--town-sidebar-foreground));
   }
   .app-navigation[data-expanded="false"]
     .room-rail-link:hover
     .primary-navigation-label {
-    position: static;
-    transform: none;
     opacity: 1;
   }
   .app-navigation[data-expanded="true"]

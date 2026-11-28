@@ -45,6 +45,9 @@ import {
 } from "./connected-apps-queries";
 import { ConnectAppStatus, useConnectAppFlow } from "./connect-app-flow";
 import { connectorMessages as m } from "./connectors.messages";
+import type { CustomMCPConnection } from "@/features/teamhub/teamhub-external-source-client";
+import { CustomMCPDialog, CustomMCPSection } from "./custom-mcp-connectors";
+import { customMCPQueryOptions } from "./custom-mcp-queries";
 import { WebSearchSection } from "./web-search-connectors";
 
 const APP_GRID_CLASS = "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3";
@@ -60,6 +63,8 @@ export function ConnectedAppsPage() {
   const requestedApp = searchParams.get("app");
   const apps = useQuery(externalAppsQueryOptions(client));
   const connections = useQuery(externalConnectionsQueryOptions(client));
+  const customMCP = useQuery(customMCPQueryOptions(client));
+  const [editingMCP, setEditingMCP] = useState<CustomMCPConnection | null>();
   const webSearch = useQuery(webSearchBackendsQueryOptions(client));
   // "all" shows every group; otherwise one group's id.
   const [filter, setFilter] = useState("all");
@@ -88,6 +93,7 @@ export function ConnectedAppsPage() {
     { id: "all", label: t(m.filterAll) },
     ...groups.map(({ group }) => ({ id: group.id, label: t(group.title) })),
     { id: WEB_SEARCH_FILTER.id, label: t(WEB_SEARCH_FILTER.label) },
+    { id: "custom", label: t(m.customGroup) },
   ];
   const groupApps = groups.find((entry) => entry.group.id === filter)?.apps;
   // Connected only narrows whichever view is open; with All it is one grid.
@@ -102,7 +108,9 @@ export function ConnectedAppsPage() {
   // DuckDuckGo needs no key, so Connected only always keeps the section.
   const showSearch = filter === "all" || searchFilter;
   const showApps =
-    !searchFilter && (!showSearch || !filteredApps || filteredApps.length > 0);
+    filter !== "custom" &&
+    !searchFilter &&
+    (!showSearch || !filteredApps || filteredApps.length > 0);
 
   function renderApp(app: TeamHubExternalApp) {
     return (
@@ -190,6 +198,9 @@ export function ConnectedAppsPage() {
               >
                 {t(m.connectedOnly)}
               </Button>
+              <Button className="shrink-0" onClick={() => setEditingMCP(null)}>
+                {t(m.addCustomConnector)}
+              </Button>
             </div>
             {!showApps ? null : filteredApps ? (
               filteredApps.length ? (
@@ -231,9 +242,22 @@ export function ConnectedAppsPage() {
                 list={webSearch}
               />
             ) : null}
+            {filter === "all" || filter === "custom" ? (
+              <CustomMCPSection
+                connections={customMCP.data?.connections ?? []}
+                onEdit={setEditingMCP}
+              />
+            ) : null}
           </>
         )}
       </div>
+
+      {editingMCP !== undefined ? (
+        <CustomMCPDialog
+          connection={editingMCP}
+          onClose={() => setEditingMCP(undefined)}
+        />
+      ) : null}
 
       {selectedApp ? (
         <AppManageDialog

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/custommcp"
 )
 
 var teamhubEnvironment = []string{
@@ -23,6 +25,7 @@ var teamhubEnvironment = []string{
 	"COMPOSIO_API_KEY",
 	"TEAMHUB_LOCAL_IDENTITY_KEY",
 	"TEAMHUB_COMPOSIO_ENVIRONMENT_KEY",
+	"TEAMHUB_CUSTOM_MCP_NETWORK",
 	"WEB_PUBLIC_ORIGIN",
 	"SONIOX_API_KEY",
 	"XAI_API_KEY",
@@ -402,6 +405,35 @@ func clearTeamHubEnvironment(t *testing.T) {
 	t.Helper()
 	for _, name := range teamhubEnvironment {
 		t.Setenv(name, "")
+	}
+}
+
+func TestCustomMCPNetworkConfiguration(t *testing.T) {
+	clearTeamHubEnvironment(t)
+	t.Setenv("TEAMHUB_DATABASE_URL", "postgres://fixture.example/teamhub")
+	for _, test := range []struct {
+		name  string
+		value string
+		want  custommcp.NetworkPolicy
+	}{
+		{"default", "", custommcp.NetworkPublic},
+		{"public", "public", custommcp.NetworkPublic},
+		{"local", "local", custommcp.NetworkLocal},
+		{"invalid", "private", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("TEAMHUB_CUSTOM_MCP_NETWORK", test.value)
+			cfg, err := Load()
+			if test.want == "" {
+				if err == nil || !strings.Contains(err.Error(), "TEAMHUB_CUSTOM_MCP_NETWORK") {
+					t.Fatalf("Load() error = %v, want invalid network policy", err)
+				}
+				return
+			}
+			if err != nil || cfg.ExternalApps.CustomMCPNetwork != test.want {
+				t.Fatalf("Load() network = %q, error = %v, want %q", cfg.ExternalApps.CustomMCPNetwork, err, test.want)
+			}
+		})
 	}
 }
 

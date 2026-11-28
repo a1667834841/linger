@@ -14,6 +14,7 @@ import {
   SettingsRow,
   SettingsRowText,
 } from "@/components/ui/settings-group";
+import { StatusDot } from "@/features/local-computer/computer-row";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import type {
   TeamHubExternalApp,
@@ -34,6 +35,7 @@ import {
   externalConnectionAgentAccessQueryOptions,
 } from "./connected-apps-queries";
 import { connectorMessages as m } from "./connectors.messages";
+import { customMCPQueryOptions } from "./custom-mcp-queries";
 
 export function AgentConnectors({
   agentActorId,
@@ -46,6 +48,7 @@ export function AgentConnectors({
   const t = useT();
   const apps = useQuery(externalAppsQueryOptions(client));
   const connections = useQuery(externalConnectionsQueryOptions(client));
+  const customMCP = useQuery(customMCPQueryOptions(client));
   const groupLabel = t(m.agentAccounts);
   if (apps.isPending || connections.isPending)
     return (
@@ -90,9 +93,31 @@ export function AgentConnectors({
     return accounts.length ? [{ app, accounts }] : [];
   });
   const appsPath = `/t/${tenantId}/apps`;
+  const customConnections = customMCP.data?.connections ?? [];
   return (
     <div className="flex flex-col gap-5">
       <SettingsGroup ariaLabel={groupLabel}>
+        {customConnections.map((connection) => (
+          <AgentConnectionAccess
+            key={connection.id}
+            agentActorId={agentActorId}
+            app={{ display_name: connection.name }}
+            connection={{
+              id: connection.id,
+              provider: "custom_mcp",
+              status: "active",
+              identity_label: connection.endpoint,
+            }}
+            managePath={appsPath}
+            toolCount={
+              connection.authorization_status === "reauthorization_required" ||
+              connection.authorization_status === "additional_scope_required"
+                ? undefined
+                : connection.tools.length
+            }
+            tenantId={tenantId}
+          />
+        ))}
         {connected.length ? (
           connected.map(({ app, accounts }) => (
             <section key={app.key} aria-label={app.display_name}>
@@ -108,11 +133,11 @@ export function AgentConnectors({
               ))}
             </section>
           ))
-        ) : (
+        ) : customConnections.length === 0 ? (
           <SettingsRow icon={<Icon icon={PlugSocketIcon} size={16} />}>
             <SettingsRowText muted title={t(m.noConnectedAccounts)} />
           </SettingsRow>
-        )}
+        ) : null}
       </SettingsGroup>
       <SettingsGroup>
         <Link
@@ -141,12 +166,18 @@ function AgentConnectionAccess({
   connection,
   managePath,
   tenantId,
+  toolCount,
 }: {
   agentActorId: string;
-  app: TeamHubExternalApp;
-  connection: TeamHubExternalConnection;
+  app: Pick<TeamHubExternalApp, "display_name" | "logo_url">;
+  connection: Pick<
+    TeamHubExternalConnection,
+    "id" | "provider" | "status" | "identity_label"
+  >;
   managePath: string;
   tenantId: string;
+  /** Set for a healthy custom MCP connection; shown as the green status line. */
+  toolCount?: number;
 }) {
   const { client } = useTeamHubRuntime();
   const queryClient = useQueryClient();
@@ -190,8 +221,18 @@ function AgentConnectionAccess({
     </span>
   ) : access.data && !agent ? (
     t(m.accessUnavailable)
-  ) : (
+  ) : toolCount === undefined ? (
     accountIdentityText(connection.provider, connection.identity_label, t)
+  ) : (
+    <>
+      <span className="block truncate">{connection.identity_label}</span>
+      <span className="flex items-center gap-1.5">
+        <StatusDot tone="success" />
+        {t(m.customConnectorConnected)}
+        {" · "}
+        {t(m.customConnectorToolCount, { count: toolCount })}
+      </span>
+    </>
   );
   return (
     <SettingsRow

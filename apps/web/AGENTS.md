@@ -2,6 +2,13 @@
 
 React Router Data Mode and TanStack Query power the active Room-first UI.
 
+The Connectors page manages custom Streamable HTTP MCP endpoints. A Human can
+test an endpoint, save its tool catalog, edit its credentials, and disconnect it.
+OAuth opens in a separate browser window. The form shows the registered client
+redirect URI and prompts for reauthorization when a token or scope is rejected.
+Agent info uses the same per-Agent grant controls for managed and custom
+connectors.
+
 ## Common Commands
 
 - `pnpm --filter @linger/web test <test-file>`: run one test. Use the script, not `exec vitest`: it disables Node's experimental Web Storage, which hides jsdom's `localStorage`.
@@ -204,6 +211,10 @@ build:assets` to check the initial JS budget.
   startup, before its Capture arrives. Its in-page body uses the same
   `AutoHeight` timing as Voice Mode, preserving the expanded height, transcript
   scroll and Ask draft through collapse. A floated window has no handles: the
+- Follow `docs/web-ui-guidelines.md` for UI work: shared components instead of
+  native elements (`Select`, not `<select>`), dialog spacing, `StatusDot` status
+  lines, list presentation, and keeping one entity consistent across every
+  screen that shows it.
   desktop app resizes it.
 - The compact primary rail reveals labels on hover and keyboard focus without
   moving link hit areas or neighbouring links. A stationary pointer at an edge

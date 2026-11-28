@@ -1950,6 +1950,89 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v0/custom-mcp-connections": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["listCustomMcpConnections"];
+    put?: never;
+    post: operations["saveCustomMcpConnection"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/custom-mcp-connections/test": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["testCustomMcpConnection"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/custom-mcp-connections/oauth/start": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Start OAuth for a new connector or replace credentials at the given revision. */
+    post: operations["startCustomMcpOAuth"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/custom-mcp-connections/oauth/callback": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Complete an OAuth attempt returned to the public Web origin. */
+    get: operations["receiveCustomMcpOAuthCallback"];
+    put?: never;
+    /** Complete an OAuth attempt returned to the Desktop loopback receiver. */
+    post: operations["completeCustomMcpOAuth"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/custom-mcp-connections/{connectionId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete: operations["deleteCustomMcpConnection"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v0/external-connections": {
     parameters: {
       query?: never;
@@ -7156,6 +7239,71 @@ export interface components {
       items: components["schemas"]["MemoryEntryListItem"][];
       next_cursor?: components["schemas"]["Cursor"];
     };
+    CustomMcpTool: {
+      name: string;
+      description?: string;
+      inputSchema: {
+        [key: string]: unknown;
+      };
+    };
+    CustomMcpConnection: {
+      id: string;
+      name: string;
+      /** Format: uri */
+      endpoint: string;
+      has_token: boolean;
+      /** Format: int64 */
+      revision: number;
+      /**
+       * @description Bearer mode also permits anonymous access when no token is saved. Omission means bearer.
+       * @enum {string}
+       */
+      auth_method?: "bearer" | "oauth";
+      /**
+       * @description Omission means ready.
+       * @enum {string}
+       */
+      authorization_status?:
+        | "ready"
+        | "reauthorization_required"
+        | "additional_scope_required";
+      /** Format: date-time */
+      token_expires_at?: string;
+      granted_scope?: string;
+      requested_scope?: string;
+      required_scope?: string;
+      /** @description The client ID for a manually registered connector. */
+      oauth_client_id?: string;
+      /** @enum {string} */
+      oauth_registration?: "dynamic" | "manual";
+      tools: components["schemas"]["CustomMcpTool"][];
+    };
+    CustomMcpErrorResponse: {
+      error: {
+        /** @enum {string} */
+        code:
+          | "INVALID_REQUEST"
+          | "CUSTOM_MCP_OAUTH_REQUIRED"
+          | "CUSTOM_MCP_REAUTHORIZATION_REQUIRED"
+          | "CUSTOM_MCP_OAUTH_METADATA_INVALID"
+          | "CUSTOM_MCP_OAUTH_RESPONSE_INVALID"
+          | "CUSTOM_MCP_OAUTH_STATE_INVALID"
+          | "CUSTOM_MCP_OAUTH_REGISTRATION_REQUIRED"
+          | "CUSTOM_MCP_OAUTH_BINDING_CHANGED";
+        message: string;
+        request_id: string;
+        details?: components["schemas"]["ErrorDetail"][];
+      };
+    };
+    /** @description One-time OAuth return address on the desktop client's IPv4 loopback listener. */
+    ExternalConnectionDesktopCallbackURL: string;
+    CustomMcpOAuthCallback: {
+      state: string;
+      callback_id: string;
+      code?: string;
+      iss?: string;
+      error?: string;
+    };
     /** @enum {string} */
     ExternalConnectionStatus:
       | "pending"
@@ -7211,8 +7359,6 @@ export interface components {
     ExternalConnectionList: {
       connections: components["schemas"]["ExternalConnection"][];
     };
-    /** @description One-time OAuth return address on the desktop client's IPv4 loopback listener. */
-    ExternalConnectionDesktopCallbackURL: string;
     CreateExternalConnectionRequest: {
       app_key: components["schemas"]["ExternalAppKey"];
       desktop_callback_url?: components["schemas"]["ExternalConnectionDesktopCallbackURL"];
@@ -8788,6 +8934,24 @@ export interface components {
       };
       content: {
         "application/json": components["schemas"]["VoiceProviderKeyErrorResponse"];
+      };
+    };
+    /** @description The connector requires OAuth authorization or its current OAuth authorization has expired. */
+    CustomMcpAuthorizationRequired: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["CustomMcpErrorResponse"];
+      };
+    };
+    /** @description Invalid configuration, provider metadata, authorization response, or one-time state. */
+    CustomMcpOAuthError: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["CustomMcpErrorResponse"];
       };
     };
     /** @description Rejected or retryable file operation. Native latest changed throughout bounded rendering retries returns 202 with latest_not_ready, private/no-store and no document bytes. Retry after one second. Other conflicts include current and base version IDs. Service failures and exhausted serialization retries remain unavailable. */
@@ -12027,6 +12191,211 @@ export interface operations {
       401: components["responses"]["Unauthenticated"];
       404: components["responses"]["NotFound"];
       503: components["responses"]["ServiceUnavailable"];
+    };
+  };
+  listCustomMcpConnections: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The signed-in owner's custom connectors. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            connections: components["schemas"]["CustomMcpConnection"][];
+          };
+        };
+      };
+    };
+  };
+  saveCustomMcpConnection: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          id?: string;
+          /** Format: int64 */
+          revision?: number;
+          name: string;
+          /** Format: uri */
+          endpoint: string;
+          /** @description Omit on edit to retain the token for the same endpoint. Send an empty value to remove it. */
+          token?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description The saved connection and its verified tool catalog. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CustomMcpConnection"];
+        };
+      };
+      409: components["responses"]["CustomMcpAuthorizationRequired"];
+    };
+  };
+  testCustomMcpConnection: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          /** Format: uri */
+          endpoint: string;
+          token?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Tools discovered without saving the connection or calling a tool. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            tools: components["schemas"]["CustomMcpTool"][];
+          };
+        };
+      };
+      409: components["responses"]["CustomMcpAuthorizationRequired"];
+    };
+  };
+  startCustomMcpOAuth: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          id?: string;
+          /** Format: int64 */
+          revision?: number;
+          name: string;
+          /** Format: uri */
+          endpoint: string;
+          desktop_callback_url?: components["schemas"]["ExternalConnectionDesktopCallbackURL"];
+          client_id?: string;
+          /** @description Omit to retain the secret for the same saved client and endpoint. */
+          client_secret?: string;
+          scope?: string;
+          /** @description Return the exact redirect URI for manual client registration without starting authorization. */
+          redirect_only?: boolean;
+        };
+      };
+    };
+    responses: {
+      /** @description An owner-bound attempt. The connector is saved after authorization and tool discovery. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            connection_id?: string;
+            /** Format: uri */
+            authorization_url?: string;
+            /** Format: date-time */
+            expires_at?: string;
+            /** Format: uri */
+            redirect_uri: string;
+          };
+        };
+      };
+      400: components["responses"]["CustomMcpOAuthError"];
+      409: components["responses"]["Conflict"];
+    };
+  };
+  receiveCustomMcpOAuthCallback: {
+    parameters: {
+      query: {
+        state: string;
+        callback_id: string;
+        code?: string;
+        iss?: string;
+        error?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The verified connector was saved. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/html": string;
+        };
+      };
+      400: components["responses"]["CustomMcpOAuthError"];
+    };
+  };
+  completeCustomMcpOAuth: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CustomMcpOAuthCallback"];
+      };
+    };
+    responses: {
+      /** @description The verified connector was saved. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["CustomMcpOAuthError"];
+    };
+  };
+  deleteCustomMcpConnection: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        connectionId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The connection was revoked and its credentials removed. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
     };
   };
   listExternalConnections: {

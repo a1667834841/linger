@@ -23,3 +23,31 @@ it("accepts only the assigned browser callback and consumes it once", async () =
     oauth.stop();
   }
 });
+
+it("reuses the MCP redirect and forwards a structured callback without accepting duplicate parameters", async () => {
+  const oauth = new ConnectorOAuth();
+  const returned = vi.fn();
+  try {
+    const endpoint = "https://mcp.example/mcp";
+    const callback = new URL(await oauth.prepare(returned, endpoint));
+    expect(await oauth.prepare(returned, endpoint)).toBe(callback.href);
+    callback.searchParams.set("state", "x".repeat(43));
+    callback.searchParams.set("iss", "https://issuer.example");
+    callback.searchParams.set("code", "fixture-code");
+    callback.searchParams.append("state", "y".repeat(43));
+    expect((await fetch(callback)).status).toBe(400);
+    expect(returned).not.toHaveBeenCalled();
+
+    callback.searchParams.set("state", "x".repeat(43));
+    expect((await fetch(callback)).status).toBe(200);
+    expect(returned).toHaveBeenCalledExactlyOnceWith(undefined, {
+      state: "x".repeat(43),
+      code: "fixture-code",
+      iss: "https://issuer.example",
+      error: undefined,
+      callback_id: callback.pathname.split("/").at(-1),
+    });
+  } finally {
+    oauth.stop();
+  }
+});
