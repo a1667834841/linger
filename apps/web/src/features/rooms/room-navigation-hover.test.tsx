@@ -35,7 +35,7 @@ describe("collapsed navigation hover targets", () => {
   });
 
   it.each([":hover", ":focus-visible"])(
-    "still reveals the compact label on %s",
+    "reveals the label as a floating tooltip on %s",
     (state) => {
       const selector = `.app-navigation[data-expanded="false"] .room-rail-link${state}`;
       const rules = styleRules(stylesheet.sheet!.cssRules);
@@ -47,8 +47,15 @@ describe("collapsed navigation hover targets", () => {
           rule.selectorText.replace(/\s+/g, " ") ===
           `${selector} .primary-navigation-label`,
       );
-      expect(link?.style.width).toBe("max-content");
+      // The button keeps its size; only the label appears, beside it.
+      expect(link?.style.width || "").toBe("");
       expect(label?.style.opacity).toBe("1");
+      const base = rules.find(
+        (rule) =>
+          rule.selectorText.replace(/\s+/g, " ") ===
+          '.app-navigation[data-expanded="false"] .primary-navigation-label',
+      );
+      expect(base?.style.pointerEvents).toBe("none");
     },
   );
 });

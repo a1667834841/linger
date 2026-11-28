@@ -61,6 +61,41 @@ func TestCallSeparatesHandshakeAndToolDeadlines(t *testing.T) {
 	}
 }
 
+func TestCallSendsEmptyArgumentsObjectWhenNil(t *testing.T) {
+	client := NewClient(NetworkPublic)
+	var arguments json.RawMessage
+	client.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		var request struct {
+			ID     int    `json:"id"`
+			Method string `json:"method"`
+			Params struct {
+				Arguments json.RawMessage `json:"arguments"`
+			} `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			return nil, err
+		}
+		reply := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: http.NoBody}
+		result := `{"protocolVersion":"2025-11-25","capabilities":{"tools":{}}}`
+		switch request.Method {
+		case "notifications/initialized":
+			reply.StatusCode = http.StatusAccepted
+			return reply, nil
+		case "tools/call":
+			arguments = request.Params.Arguments
+			result = `{"content":[]}`
+		}
+		reply.Body = io.NopCloser(strings.NewReader(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":%s}`, request.ID, result)))
+		return reply, nil
+	})
+	if _, err := client.Call(t.Context(), "https://example.com/mcp", "", "list", nil); err != nil {
+		t.Fatal(err)
+	}
+	if string(arguments) != "{}" {
+		t.Fatalf("arguments = %s, want {}", arguments)
+	}
+}
+
 func TestCallClassifiesHandshakeFailureBeforeDispatch(t *testing.T) {
 	client := NewClient(NetworkPublic)
 	client.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -292,6 +327,56 @@ func TestLocalEndpointCannotFollowRedirect(t *testing.T) {
 	defer client.http.CloseIdleConnections()
 	if _, err := client.Discover(t.Context(), server.URL+"/mcp", "fixture-token"); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("discover after redirect = %v, want unavailable", err)
+	}
+}
+
+func TestCallReturnsServerRPCError(t *testing.T) {
+	const token = "fixture-token"
+	tests := []struct {
+		name    string
+		message string
+		want    string
+		wantRPC bool
+	}{
+		{"invalid params", "Invalid arguments:\n expected object", "Invalid arguments:  expected object", true},
+		{"echoed token", "bad " + token, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := NewClient(NetworkPublic)
+			client.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				var request struct {
+					ID     int    `json:"id"`
+					Method string `json:"method"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					return nil, err
+				}
+				reply := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: http.NoBody}
+				switch request.Method {
+				case "notifications/initialized":
+					reply.StatusCode = http.StatusAccepted
+					return reply, nil
+				case "tools/call":
+					body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": map[string]any{"code": -32602, "message": tt.message}})
+					reply.Body = io.NopCloser(strings.NewReader(string(body)))
+					return reply, nil
+				}
+				reply.Body = io.NopCloser(strings.NewReader(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}}}}`, request.ID)))
+				return reply, nil
+			})
+			_, err := client.Call(t.Context(), "https://example.com/mcp", token, "list", nil)
+			var rpc *RPCError
+			if got := errors.As(err, &rpc); got != tt.wantRPC {
+				t.Fatalf("RPCError = %v (%v), want %v", got, err, tt.wantRPC)
+			}
+			if !errors.Is(err, ErrUnavailable) {
+				t.Fatalf("err = %v, want it to match unavailable", err)
+			}
+			if tt.wantRPC && (rpc.Code != -32602 || rpc.Message != tt.want) {
+				t.Fatalf("rpc = %+v", rpc)
+			}
+		})
 	}
 }
 

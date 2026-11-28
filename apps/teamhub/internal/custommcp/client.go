@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 )
 
 const (
@@ -36,6 +38,48 @@ var (
 	// ErrNotDispatched means the session failed before tools/call was sent.
 	ErrNotDispatched = errors.New("the MCP tool call was not dispatched")
 )
+
+// maxRPCMessage bounds the server-supplied text carried by RPCError.
+const maxRPCMessage = 300
+
+// RPCError is a JSON-RPC error the MCP server returned for a request. The
+// server answered, so the call did not run. It still matches ErrUnavailable
+// for callers that only classify reachability.
+type RPCError struct {
+	Code    int
+	Message string
+}
+
+func (e *RPCError) Error() string {
+	if e.Message == "" {
+		return fmt.Sprintf("the MCP server returned error %d", e.Code)
+	}
+	return fmt.Sprintf("the MCP server returned error %d: %s", e.Code, e.Message)
+}
+
+func (e *RPCError) Unwrap() error { return ErrUnavailable }
+
+// newRPCError copies the server's error and drops control characters and
+// excess length, since the text is shown to people.
+func newRPCError(raw json.RawMessage) *RPCError {
+	var payload struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(raw, &payload) != nil {
+		return nil
+	}
+	message := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, payload.Message)
+	if runes := []rune(message); len(runes) > maxRPCMessage {
+		message = string(runes[:maxRPCMessage])
+	}
+	return &RPCError{Code: payload.Code, Message: strings.TrimSpace(message)}
+}
 
 // Tool is the remote name, description and input schema discovered from MCP.
 type Tool struct {
@@ -150,9 +194,18 @@ func (c *Client) Call(ctx context.Context, endpoint, token, name string, argumen
 	if err := call.Err(); err != nil {
 		return nil, errors.Join(ErrNotDispatched, err)
 	}
+	// A nil map would encode as JSON null, which servers validating the tool schema reject.
+	if arguments == nil {
+		arguments = map[string]any{}
+	}
 	var result json.RawMessage
 	err = session.post(call, 2, "tools/call", map[string]any{"name": name, "arguments": arguments}, &result)
 	if err == nil && replyContainsToken(result, token) {
+		return nil, ErrUnavailable
+	}
+	// Server text never carries the caller's token back to the user.
+	var rpc *RPCError
+	if errors.As(err, &rpc) && containsToken(rpc.Message, token) {
 		return nil, ErrUnavailable
 	}
 	return result, err
@@ -346,7 +399,13 @@ func decodeReply(response *http.Response, id int, result any) error {
 		if json.Unmarshal(raw, &reply) != nil || reply.JSONRPC != "2.0" || reply.ID != id {
 			return false, nil
 		}
-		if len(reply.Error) != 0 || len(reply.Result) == 0 || bytes.Equal(reply.Result, []byte("null")) ||
+		if len(reply.Error) != 0 {
+			if rpc := newRPCError(reply.Error); rpc != nil {
+				return true, rpc
+			}
+			return true, ErrUnavailable
+		}
+		if len(reply.Result) == 0 || bytes.Equal(reply.Result, []byte("null")) ||
 			json.Unmarshal(reply.Result, result) != nil {
 			return true, ErrUnavailable
 		}

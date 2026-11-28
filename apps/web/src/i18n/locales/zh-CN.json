@@ -1610,6 +1610,11 @@
     "sourceByokUpstreamRejected": "端点拒绝了测试请求。",
     "sourceNoRoom": "这台电脑的可用内存不足，无法加载这个模型。请关闭占用内存多的应用或卸载其他模型，重新检测内存后重试。",
     "sourceSwitchFailed": "这台电脑没能完成切换，请重试。",
+    "customConnectorDescription": "通过 Streamable HTTP 接入任意 MCP 服务，让 Agent 使用它提供的工具。Agent 在「已连接应用」里调用这些工具，每次调用都会请你确认。",
+    "customConnectorConnected": "已连接",
+    "customConnectorToolCount": {
+      "other": "{count} 个工具"
+    },
     "sourceForbidden": "只有连接这台电脑的人才能更改它的模型。",
     "sourceUnavailable": "这台电脑无法切换模型。请先更新它上面的 Linger，然后重试。",
     "sourceUnconfirmed": "这台电脑没有及时响应。它可能仍在切换，请一分钟后再查看。",
@@ -2128,7 +2133,6 @@
     "customConnectorOAuthExpired": "授权已过期或被拒绝。请重新授权。",
     "customConnectorOAuthMoreAccess": "此连接器需要额外权限。",
     "customConnectorOAuthWaiting": "请在浏览器窗口中完成授权。",
-    "customConnectorScope": "OAuth 权限范围（可选，用空格分隔）",
     "customConnectorManualClient": "使用已注册的 OAuth 客户端",
     "customConnectorClientID": "OAuth 客户端 ID",
     "customConnectorClientSecret": "OAuth 客户端密钥（可选）",

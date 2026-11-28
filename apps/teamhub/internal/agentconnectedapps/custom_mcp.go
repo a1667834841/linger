@@ -135,6 +135,11 @@ func (s *Service) invokeConfirmedCustomMCP(ctx context.Context, connection exter
 	if errors.Is(err, custommcp.ErrNotDispatched) || errors.Is(err, custommcp.ErrUnauthorized) || errors.Is(err, custommcp.ErrInvalid) {
 		return "failed", "TeamHub could not dispatch the call to the custom MCP server.", nil
 	}
+	// The server answered with a JSON-RPC error, so the call did not run.
+	var rpc *custommcp.RPCError
+	if errors.As(err, &rpc) {
+		return "failed", fmt.Sprintf("The custom MCP server rejected the call: %s (error %d)", rpc.Message, rpc.Code), nil
+	}
 	var response struct {
 		IsError bool `json:"isError"`
 	}

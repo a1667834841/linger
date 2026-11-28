@@ -23,6 +23,10 @@ export const connectorMessages = defineMessages("connectors", {
   customConnectorEndpoint: "MCP URL",
   customConnectorToken: "Bearer token",
   customConnectorKeepToken: "Keep saved token",
+  customConnectorDescription:
+    "Connect any MCP server over Streamable HTTP so your Agents can use its tools. Agents call them from Connected apps, and every call asks for your confirmation.",
+  customConnectorConnected: "Connected",
+  customConnectorToolCount: { one: "{count} tool", other: "{count} tools" },
   customConnectorToolList: "Discovered tools",
   customConnectorNoTools: "The MCP server returned no tools.",
   customConnectorTest: "Test connection",
@@ -37,7 +41,6 @@ export const connectorMessages = defineMessages("connectors", {
   customConnectorOAuthMoreAccess:
     "This connector needs additional permissions.",
   customConnectorOAuthWaiting: "Complete authorization in the browser window.",
-  customConnectorScope: "OAuth scopes (optional, space-separated)",
   customConnectorManualClient: "Use a registered OAuth client",
   customConnectorClientID: "OAuth client ID",
   customConnectorClientSecret: "OAuth client secret (optional)",
