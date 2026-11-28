@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/custommcp"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/localidentity"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/secretbox"
 )
@@ -101,13 +102,14 @@ type JobsConfig struct {
 	SkillPackageProbeRetry time.Duration
 }
 
-// ExternalAppsConfig configures connected apps through Composio. The API key
+// ExternalAppsConfig configures Composio and custom MCP. The Composio API key
 // may also be saved on the Apps page, so the feature is decided at use time.
 type ExternalAppsConfig struct {
 	ComposioEnvironmentKey      string // prefixes each Composio user ID; deployments sharing a Composio project need distinct keys
 	ComposioBaseURL             string // empty is the Composio API; tests point it at a fake provider
 	ComposioAPIKey              string
 	SecretEncryptionKey         string // base64 32-byte key; encrypts the Composio API key saved in the product
+	CustomMCPNetwork            custommcp.NetworkPolicy
 	MaxRetryAfter               time.Duration
 	AppImportProviderCallBudget int
 }
@@ -283,6 +285,7 @@ func Default() Config {
 		PublicWebURL:                "http://localhost:3000",
 		ExternalApps: ExternalAppsConfig{
 			ComposioEnvironmentKey:      DefaultComposioEnvironmentKey,
+			CustomMCPNetwork:            custommcp.NetworkPublic,
 			MaxRetryAfter:               10 * time.Second,
 			AppImportProviderCallBudget: 100,
 		},
@@ -319,6 +322,9 @@ func applyEnvironment(cfg *Config) {
 	setNonemptyEnvironment(&cfg.ExternalApps.ComposioEnvironmentKey, "TEAMHUB_COMPOSIO_ENVIRONMENT_KEY")
 	setNonemptyEnvironment(&cfg.ExternalApps.ComposioAPIKey, "COMPOSIO_API_KEY")
 	setNonemptyEnvironment(&cfg.ExternalApps.SecretEncryptionKey, "TEAMHUB_SECRET_ENCRYPTION_KEY")
+	if value := os.Getenv("TEAMHUB_CUSTOM_MCP_NETWORK"); value != "" {
+		cfg.ExternalApps.CustomMCPNetwork = custommcp.NetworkPolicy(value)
+	}
 	setNonemptyEnvironment(&cfg.LocalIdentityKey, "TEAMHUB_LOCAL_IDENTITY_KEY")
 	setNonemptyEnvironment(&cfg.Voice.SonioxAPIKey, "SONIOX_API_KEY")
 	setNonemptyEnvironment(&cfg.Voice.XaiAPIKey, "XAI_API_KEY")
@@ -334,6 +340,11 @@ func applyEnvironment(cfg *Config) {
 }
 
 func validate(cfg *Config) error {
+	switch cfg.ExternalApps.CustomMCPNetwork {
+	case custommcp.NetworkPublic, custommcp.NetworkLocal:
+	default:
+		return errors.New("TEAMHUB_CUSTOM_MCP_NETWORK must be public or local")
+	}
 	if err := validatePublicURL(cfg); err != nil {
 		return err
 	}

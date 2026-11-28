@@ -298,6 +298,7 @@ if (args.includes("--resume")) {
     path.join(home, "installer", "resume-env.json"),
     JSON.stringify({
       ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
+      TEAMHUB_CUSTOM_MCP_NETWORK: process.env.TEAMHUB_CUSTOM_MCP_NETWORK,
       XAI_API_KEY: process.env.XAI_API_KEY,
       NODE_OPTIONS: process.env.NODE_OPTIONS,
       PGHOST: process.env.PGHOST,
@@ -335,6 +336,7 @@ fs.writeFileSync(
   path.join(home, "installer", "server-env.json"),
   JSON.stringify({
     ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
+    TEAMHUB_CUSTOM_MCP_NETWORK: process.env.TEAMHUB_CUSTOM_MCP_NETWORK,
     XAI_API_KEY: process.env.XAI_API_KEY,
     NODE_OPTIONS: process.env.NODE_OPTIONS,
     PGHOST: process.env.PGHOST,
@@ -927,6 +929,11 @@ describe("LocalServerModule", () => {
       expect.arrayContaining(["--external-computer", "--no-open"]),
     );
     expect(args[args.indexOf("--instance") + 1]).toBe(LOCAL_INSTANCE);
+    expect(
+      JSON.parse(
+        readFileSync(path.join(f.home, "installer", "server-env.json"), "utf8"),
+      ),
+    ).toMatchObject({ TEAMHUB_CUSTOM_MCP_NETWORK: "local" });
     expect(f.api.created).toEqual([
       {
         instance: LOCAL_INSTANCE,
@@ -4739,6 +4746,11 @@ describe("LocalServerModule after a restart", () => {
       expect.arrayContaining(["--resume", "--source-repo", "/source"]),
     );
     expect(args[args.indexOf("--instance") + 1]).toBe(LOCAL_INSTANCE);
+    expect(
+      JSON.parse(
+        readFileSync(path.join(f.home, "installer", "resume-env.json"), "utf8"),
+      ),
+    ).toMatchObject({ TEAMHUB_CUSTOM_MCP_NETWORK: "local" });
     expect(f.signIn).not.toHaveBeenCalled();
     await f.host.stop("quit");
   });

@@ -1,4 +1,4 @@
-// Package custommcp connects to user-configured public MCP servers.
+// Package custommcp connects to user-configured MCP servers.
 package custommcp
 
 import (
@@ -16,8 +16,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	"github.com/simplexai-labs/linger/apps/teamhub/internal/publicnet"
 )
 
 const (
@@ -30,7 +28,7 @@ const (
 
 var (
 	// ErrInvalid identifies a configuration that cannot be used.
-	ErrInvalid = errors.New("invalid public MCP endpoint or credentials")
+	ErrInvalid = errors.New("invalid MCP endpoint or credentials")
 	// ErrUnauthorized identifies rejected credentials.
 	ErrUnauthorized = errors.New("the MCP server rejected authentication")
 	// ErrUnavailable identifies an unreachable or incompatible MCP server.
@@ -46,26 +44,17 @@ type Tool struct {
 	InputSchema json.RawMessage `json:"inputSchema"`
 }
 
-// Client opens short-lived Streamable HTTP sessions against public endpoints.
+// Client opens short-lived Streamable HTTP sessions under a network policy.
 type Client struct {
-	http *http.Client
+	http   *http.Client
+	policy NetworkPolicy
 }
 
 // NewClient validates the actual dial destination and does not follow redirects.
-func NewClient() *Client {
-	dialer := &net.Dialer{
-		Timeout: 5 * time.Second,
-		Control: func(_, address string, _ syscall.RawConn) error {
-			target, err := netip.ParseAddrPort(address)
-			if err != nil || !publicnet.IsPublic(target.Addr()) {
-				return ErrInvalid
-			}
-			return nil
-		},
-	}
-	return &Client{http: &http.Client{
+func NewClient(policy NetworkPolicy) *Client {
+	return &Client{policy: policy, http: &http.Client{
 		Transport: &http.Transport{
-			DialContext:            dialer.DialContext,
+			DialContext:            policy.dialContext,
 			ForceAttemptHTTP2:      true,
 			TLSHandshakeTimeout:    5 * time.Second,
 			MaxResponseHeaderBytes: 64 << 10,
@@ -74,6 +63,28 @@ func NewClient() *Client {
 		},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}}
+}
+
+func (policy NetworkPolicy) dialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, ErrInvalid
+	}
+	// Every connection to localhost must stay on loopback, including idle
+	// connections opened by an anonymous request and reused for a token.
+	loopbackOnly := policy == NetworkLocal && isLocalhost(host)
+	dialer := net.Dialer{
+		Timeout: 5 * time.Second,
+		Control: func(_, resolvedAddress string, _ syscall.RawConn) error {
+			target, err := netip.ParseAddrPort(resolvedAddress)
+			if err != nil || !policy.allowsAddress(target.Addr()) ||
+				(loopbackOnly && !target.Addr().Unmap().IsLoopback()) {
+				return ErrInvalid
+			}
+			return nil
+		},
+	}
+	return dialer.DialContext(ctx, network, address)
 }
 
 // Discover returns the tools a server exposes without invoking them.
@@ -178,11 +189,17 @@ func (c *Client) open(ctx context.Context, endpoint, token string) (*session, er
 	target, err := url.Parse(endpoint)
 	if err != nil || len(endpoint) > 2048 || target.Hostname() == "" || target.User != nil ||
 		target.Fragment != "" || target.RawQuery != "" || target.ForceQuery ||
-		(target.Scheme != "https" && (target.Scheme != "http" || token != "")) ||
+		(target.Scheme != "https" && target.Scheme != "http") ||
 		len(token) > 8192 || strings.ContainsAny(token, " \r\n\t") {
 		return nil, ErrInvalid
 	}
-	if address, err := netip.ParseAddr(target.Hostname()); err == nil && !publicnet.IsPublic(address) {
+	host := target.Hostname()
+	address, addressErr := netip.ParseAddr(host)
+	if addressErr == nil && !c.policy.allowsAddress(address) {
+		return nil, ErrInvalid
+	}
+	if target.Scheme == "http" && token != "" &&
+		(c.policy != NetworkLocal || !(isLocalhost(host) || address.Unmap().IsLoopback())) {
 		return nil, ErrInvalid
 	}
 	s := &session{http: c.http, endpoint: target.String(), token: token}

@@ -2,11 +2,14 @@
 
 Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
 
-TeamHub connects to public custom MCP endpoints using Streamable HTTP. An
-endpoint can be anonymous or use an encrypted Bearer token over HTTPS. Saving
-or editing a connector verifies its catalog. An explicit Agent grant allows
-discovery, and each tool call waits for the sponsor's confirmation. Approval
-rechecks the grant and the catalog revision before dispatch.
+TeamHub uses Streamable HTTP for custom MCP. The default
+`TEAMHUB_CUSTOM_MCP_NETWORK=public` allows public addresses only. Desktop's
+local TeamHub uses `local`, which also permits loopback, private addresses,
+and shared IPv4 addresses. TeamHub checks addresses at dial time and refuses
+redirects. Bearer tokens require HTTPS except on loopback in `local` mode.
+Saving or editing a connector verifies its catalog. An explicit Agent grant
+allows discovery, and each tool call waits for the sponsor's confirmation.
+Approval rechecks the grant and the catalog revision before dispatch.
 
 ## Common Commands
 

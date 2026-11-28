@@ -17,7 +17,7 @@ import (
 )
 
 func TestCallSeparatesHandshakeAndToolDeadlines(t *testing.T) {
-	client := NewClient()
+	client := NewClient(NetworkPublic)
 	client.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		var request struct {
 			ID     int    `json:"id"`
@@ -62,7 +62,7 @@ func TestCallSeparatesHandshakeAndToolDeadlines(t *testing.T) {
 }
 
 func TestCallClassifiesHandshakeFailureBeforeDispatch(t *testing.T) {
-	client := NewClient()
+	client := NewClient(NetworkPublic)
 	client.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusUnauthorized, Body: http.NoBody}, nil
 	})
@@ -161,7 +161,7 @@ func TestDiscoverAndCallStreamableHTTP(t *testing.T) {
 }
 
 func TestRejectPrivateEndpointsAndInsecureBearer(t *testing.T) {
-	client := NewClient()
+	client := NewClient(NetworkPublic)
 	for _, endpoint := range []string{"https://127.0.0.1/mcp", "https://[::ffff:127.0.0.1]/mcp", "https://169.254.169.254/mcp", "http://localhost/mcp"} {
 		if _, err := client.Discover(t.Context(), endpoint, ""); !errors.Is(err, ErrInvalid) {
 			t.Errorf("discover %s: %v, want invalid", endpoint, err)
@@ -172,10 +172,56 @@ func TestRejectPrivateEndpointsAndInsecureBearer(t *testing.T) {
 	}
 }
 
-func TestAnonymousDiscoveryDoesNotSendAuthorization(t *testing.T) {
+func TestLocalNetworkEndpointValidation(t *testing.T) {
+	client := NewClient(NetworkLocal)
+	client.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusUnauthorized, Body: http.NoBody}, nil
+	})
+	for _, test := range []struct {
+		host string
+		want error
+	}{
+		{"127.0.0.2", ErrUnauthorized},
+		{"[::1]", ErrUnauthorized},
+		{"10.0.0.1", ErrUnauthorized},
+		{"172.31.0.1", ErrUnauthorized},
+		{"192.168.0.1", ErrUnauthorized},
+		{"[fd00::1]", ErrUnauthorized},
+		{"100.64.0.1", ErrUnauthorized},
+		{"8.8.8.8", ErrUnauthorized},
+		{"[2606:4700::1111]", ErrUnauthorized},
+		{"0.0.0.0", ErrInvalid},
+		{"[::]", ErrInvalid},
+		{"169.254.169.254", ErrInvalid},
+		{"[::ffff:169.254.169.254]", ErrInvalid},
+		{"[fe80::1%25lo]", ErrInvalid},
+		{"224.0.0.1", ErrInvalid},
+		{"[ff02::1]", ErrInvalid},
+		{"198.18.0.1", ErrInvalid},
+		{"240.0.0.1", ErrInvalid},
+		{"192.88.99.1", ErrInvalid},
+		{"[64:ff9b::1]", ErrInvalid},
+		{"[2001:db8::1%25lo]", ErrInvalid},
+		{"[3fff::1]", ErrInvalid},
+		{"[4000::1]", ErrInvalid},
+	} {
+		t.Run(test.host, func(t *testing.T) {
+			_, err := client.Discover(t.Context(), "http://"+test.host+"/mcp", "")
+			if !errors.Is(err, test.want) {
+				t.Fatalf("discover = %v, want %v", err, test.want)
+			}
+		})
+	}
+}
+
+func TestLocalHTTPDiscovery(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "" {
-			t.Error("anonymous request sent authorization")
+		wantAuthorization := ""
+		if r.URL.Path == "/authenticated" {
+			wantAuthorization = "Bearer fixture-token"
+		}
+		if got := r.Header.Get("Authorization"); got != wantAuthorization {
+			t.Errorf("authorization = %q, want %q", got, wantAuthorization)
 		}
 		var request struct {
 			ID     int    `json:"id"`
@@ -203,14 +249,49 @@ func TestAnonymousDiscoveryDoesNotSendAuthorization(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client := NewClient()
-	client.http.Transport.(*http.Transport).DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
-	}
+	client := NewClient(NetworkLocal)
 	defer client.http.CloseIdleConnections()
-	endpoint := strings.Replace(server.URL, "127.0.0.1", "example.com", 1)
-	if tools, err := client.Discover(t.Context(), endpoint, ""); err != nil || len(tools) != 0 {
+	if tools, err := client.Discover(t.Context(), server.URL, ""); err != nil || len(tools) != 0 {
 		t.Fatalf("discover = %v, %v", tools, err)
+	}
+	for _, host := range []string{"127.0.0.1", "localhost"} {
+		endpoint := strings.Replace(server.URL, "127.0.0.1", host, 1) + "/authenticated"
+		if tools, err := client.Discover(t.Context(), endpoint, "fixture-token"); err != nil || len(tools) != 0 {
+			t.Fatalf("discover from %s = %v, %v", host, tools, err)
+		}
+		if _, err := NewClient(NetworkPublic).Discover(t.Context(), endpoint, "fixture-token"); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("public discovery from %s = %v, want invalid", host, err)
+		}
+	}
+}
+
+func TestLocalHTTPRejectsBearerOutsideLoopback(t *testing.T) {
+	client := NewClient(NetworkLocal)
+	client.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		t.Errorf("contacted %s with insecure credentials", r.URL)
+		return nil, ErrUnavailable
+	})
+	for _, host := range []string{"192.168.0.1", "100.64.0.1", "[fd00::1]", "example.com", "localhost.example.com"} {
+		if _, err := client.Discover(t.Context(), "http://"+host+"/mcp", "fixture-token"); !errors.Is(err, ErrInvalid) {
+			t.Errorf("discover from %s = %v, want invalid", host, err)
+		}
+	}
+}
+
+func TestLocalEndpointCannotFollowRedirect(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/mcp" {
+			t.Errorf("followed redirect to %s", r.URL.Path)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		http.Redirect(w, r, "/redirected", http.StatusTemporaryRedirect)
+	}))
+	defer server.Close()
+	client := NewClient(NetworkLocal)
+	defer client.http.CloseIdleConnections()
+	if _, err := client.Discover(t.Context(), server.URL+"/mcp", "fixture-token"); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("discover after redirect = %v, want unavailable", err)
 	}
 }
 
@@ -221,7 +302,7 @@ func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) 
 }
 
 func TestBearerCannotFollowRedirect(t *testing.T) {
-	client := NewClient()
+	client := NewClient(NetworkPublic)
 	var hosts []string
 	client.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		hosts = append(hosts, r.URL.Host)
@@ -258,7 +339,7 @@ func TestBearerIsNotReturnedFromUpstream(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := NewClient()
+			client := NewClient(NetworkPublic)
 			client.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				var request struct {
 					ID     int    `json:"id"`

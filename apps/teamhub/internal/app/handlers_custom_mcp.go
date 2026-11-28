@@ -73,7 +73,11 @@ func (a *App) writeCustomMCPError(c *gin.Context, err error) bool {
 	case err == nil:
 		return false
 	case errors.Is(err, custommcp.ErrInvalid), errors.Is(err, externalsource.ErrInvalid):
-		a.writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "Enter a public MCP URL and use HTTPS for a bearer token")
+		message := "Enter a public MCP URL and use HTTPS for a bearer token"
+		if a.cfg.ExternalApps.CustomMCPNetwork == custommcp.NetworkLocal {
+			message = "Enter an allowed MCP URL. Use HTTPS for a bearer token unless the server is on loopback."
+		}
+		a.writeError(c, http.StatusBadRequest, "INVALID_REQUEST", message)
 	case errors.Is(err, custommcp.ErrUnauthorized):
 		a.writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "The MCP server rejected authentication")
 	case errors.Is(err, custommcp.ErrUnavailable):

@@ -37,10 +37,10 @@ type CustomMCPConnection struct {
 	Tools    []custommcp.Tool `json:"tools"`
 }
 
-// ConfigureCustomMCP installs the public-endpoint client and optional encryption key.
-func (s *Service) ConfigureCustomMCP(box *secretbox.Box, client CustomMCPClient) {
+// ConfigureCustomMCP installs the client and optional encryption key. The policy configures the default client.
+func (s *Service) ConfigureCustomMCP(box *secretbox.Box, client CustomMCPClient, policy custommcp.NetworkPolicy) {
 	if client == nil {
-		client = custommcp.NewClient()
+		client = custommcp.NewClient(policy)
 	}
 	s.customMCP = &customMCPCatalog{client: client, box: box}
 }

@@ -49,6 +49,10 @@ your machine against a PostgreSQL you provide; see
 [Local PostgreSQL 17 for development](local-postgresql.md) and
 [CONTRIBUTING.md](../CONTRIBUTING.md).
 
+Self-hosted TeamHub defaults to `TEAMHUB_CUSTOM_MCP_NETWORK=public` for custom
+MCP connectors. Desktop's local TeamHub uses `local` to also reach loopback,
+private addresses, and shared IPv4 addresses.
+
 To collect the desktop app's diagnostics from your people, run a receiver
 for [Diagnostics upload](diagnostics-upload.md) and set its address as
 `diagnosticsUploadUrl` in each app's `config.json`.
