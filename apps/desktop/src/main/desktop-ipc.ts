@@ -129,30 +129,37 @@ export class DesktopIpcModule implements Module {
     const diagnostics = ctx.get<DiagnosticsModule>("Diagnostics");
 
     const oauth = new ConnectorOAuth();
-    ipcMain.handle(IPC.connectorOAuthPrepare, (event: IpcMainInvokeEvent) => {
-      const contents = windows.webContents();
-      const origin = ctx.config.get().serverUrl;
-      if (
-        !contents ||
-        !origin ||
-        event.sender !== contents ||
-        event.senderFrame !== contents.mainFrame ||
-        !sameOrigin(contents.getURL(), origin)
-      ) {
-        throw new Error("Not allowed");
-      }
-      return oauth.prepare((account) => {
+    ipcMain.handle(
+      IPC.connectorOAuthPrepare,
+      (event: IpcMainInvokeEvent, endpoint?: unknown) => {
+        const contents = windows.webContents();
+        const origin = ctx.config.get().serverUrl;
         if (
-          contents.isDestroyed() ||
+          !contents ||
+          !origin ||
+          event.sender !== contents ||
+          event.senderFrame !== contents.mainFrame ||
           !sameOrigin(contents.getURL(), origin) ||
-          contents !== windows.webContents()
-        )
-          return;
-        windows.show();
-        if (process.platform === "darwin") app.focus({ steal: true });
-        contents.send(IPC.connectorOAuthReturn, account);
-      });
-    });
+          (endpoint !== undefined &&
+            (typeof endpoint !== "string" ||
+              !endpoint ||
+              endpoint.length > 2048))
+        ) {
+          throw new Error("Not allowed");
+        }
+        return oauth.prepare((account, customMCP) => {
+          if (
+            contents.isDestroyed() ||
+            !sameOrigin(contents.getURL(), origin) ||
+            contents !== windows.webContents()
+          )
+            return;
+          windows.show();
+          if (process.platform === "darwin") app.focus({ steal: true });
+          contents.send(IPC.connectorOAuthReturn, account, customMCP);
+        }, endpoint);
+      },
+    );
     this.#unsubscribe.push(() => {
       ipcMain.removeHandler(IPC.connectorOAuthPrepare);
       oauth.stop();

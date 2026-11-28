@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import {
   IPC,
   type ComputerStatus,
+  type ConnectorOAuthResponse,
   type DesktopDriverInstallState,
   type DesktopSettings,
   type DesktopUpdateState,
@@ -68,9 +69,14 @@ const api: LingerDesktopApi = {
   },
   connectorOAuth: {
     prepare: () => ipcRenderer.invoke(IPC.connectorOAuthPrepare),
+    prepareCustomMCP: (endpoint) =>
+      ipcRenderer.invoke(IPC.connectorOAuthPrepare, endpoint),
     onReturn: (callback) => {
-      const listener = (_event: unknown, account?: string): void =>
-        callback(account);
+      const listener = (
+        _event: unknown,
+        account?: string,
+        customMCP?: ConnectorOAuthResponse,
+      ): void => callback(account, customMCP);
       ipcRenderer.on(IPC.connectorOAuthReturn, listener);
       return () => ipcRenderer.off(IPC.connectorOAuthReturn, listener);
     },

@@ -169,6 +169,8 @@ const externalSourceClientMethods = [
   "saveCustomMCP",
   "testCustomMCP",
   "deleteCustomMCP",
+  "startCustomMCPOAuth",
+  "completeCustomMCPOAuth",
   "completeExternalConnectionAuthorization",
   "createExternalConnection",
   "createExternalConnectionReauthorization",

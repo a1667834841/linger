@@ -371,7 +371,7 @@ func (c *Client) CreateConnectionLink(ctx context.Context, authConfigID, account
 	}
 	body := map[string]string{"auth_config_id": authConfigID, "user_id": c.UserIDForAccount(accountID)}
 	callback := c.callbackURL
-	if desktop, ok := ctx.Value(desktopCallbackKey{}).(string); ok {
+	if desktop := DesktopOAuthCallback(ctx); desktop != "" {
 		callback = desktop
 	}
 	if callback != "" {

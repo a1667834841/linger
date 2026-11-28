@@ -73,6 +73,111 @@ describe("Connected apps", () => {
     );
   });
 
+  it("offers OAuth after a protected resource challenge and opens an isolated authorization window", async () => {
+    const runtime = await testRuntime();
+    vi.spyOn(runtime.client, "listCustomMCP").mockResolvedValue({
+      connections: [],
+    });
+    vi.spyOn(runtime.client, "testCustomMCP").mockRejectedValue(
+      new TeamHubError({
+        code: "CUSTOM_MCP_OAUTH_REQUIRED",
+        message: "OAuth required",
+        status: 409,
+      }),
+    );
+    const start = vi
+      .spyOn(runtime.client, "startCustomMCPOAuth")
+      .mockResolvedValue({
+        redirect_uri: "https://linger.example/oauth/callback",
+        authorization_url: "https://issuer.example/authorize",
+        connection_id: "oauth-connection",
+        expires_at: new Date(Date.now() + 60_000).toISOString(),
+      });
+    const navigate = vi.fn();
+    const popup = { opener: window, location: { replace: navigate } };
+    const open = vi
+      .spyOn(window, "open")
+      .mockReturnValue(popup as unknown as Window);
+    renderPage(runtime);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Add custom connector" }),
+    );
+    const dialog = within(
+      screen.getByRole("dialog", { name: "Add custom connector" }),
+    );
+    fireEvent.change(dialog.getByLabelText("Name"), {
+      target: { value: "OAuth MCP" },
+    });
+    fireEvent.change(dialog.getByLabelText("MCP URL"), {
+      target: { value: "https://mcp.example/mcp" },
+    });
+    fireEvent.click(dialog.getByRole("button", { name: "Test connection" }));
+    fireEvent.click(await dialog.findByRole("button", { name: "Authorize" }));
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith("https://issuer.example/authorize"),
+    );
+    expect(open).toHaveBeenCalledWith(
+      "about:blank",
+      "_blank",
+      expect.any(String),
+    );
+    expect(popup.opener).toBeNull();
+    expect(start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "OAuth MCP",
+        endpoint: "https://mcp.example/mcp",
+      }),
+    );
+  });
+
+  it("shows expired OAuth authorization and the manual client's redirect URI", async () => {
+    const runtime = await testRuntime();
+    vi.spyOn(runtime.client, "listCustomMCP").mockResolvedValue({
+      connections: [
+        {
+          id: "oauth-connection",
+          name: "OAuth MCP",
+          endpoint: "https://mcp.example/mcp",
+          has_token: true,
+          tools: [],
+          revision: 2,
+          auth_method: "oauth",
+          authorization_status: "reauthorization_required",
+          oauth_registration: "manual",
+          oauth_client_id: "saved-client",
+        },
+      ],
+    });
+    const redirect =
+      "https://linger.example/v0/custom-mcp-connections/oauth/callback?callback_id=fixture";
+    const start = vi
+      .spyOn(runtime.client, "startCustomMCPOAuth")
+      .mockResolvedValue({ redirect_uri: redirect });
+    renderPage(runtime);
+    expect(
+      await screen.findByText(
+        "Authorization expired or was rejected. Authorize again.",
+      ),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Reauthorize" }));
+    const dialog = within(
+      screen.getByRole("dialog", { name: "Edit custom connector" }),
+    );
+    expect(dialog.getByRole("button", { name: "Reauthorize" })).toBeEnabled();
+    fireEvent.click(dialog.getByRole("button", { name: "Show redirect URI" }));
+    expect(await dialog.findByLabelText("OAuth redirect URI")).toHaveValue(
+      redirect,
+    );
+    expect(start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "oauth-connection",
+        revision: 2,
+        client_id: "saved-client",
+        redirect_only: true,
+      }),
+    );
+  });
+
   it("lists curated apps without a key and explains that an admin must set one", async () => {
     const runtime = await testRuntime();
     vi.spyOn(runtime.client, "listExternalApps").mockResolvedValue(

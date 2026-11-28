@@ -185,12 +185,11 @@ type session struct {
 	id, protocolVersion string
 }
 
-func (c *Client) open(ctx context.Context, endpoint, token string) (*session, error) {
+func (c *Client) target(endpoint string, credentials, allowQuery bool) (*url.URL, error) {
 	target, err := url.Parse(endpoint)
 	if err != nil || len(endpoint) > 2048 || target.Hostname() == "" || target.User != nil ||
-		target.Fragment != "" || target.RawQuery != "" || target.ForceQuery ||
-		(target.Scheme != "https" && target.Scheme != "http") ||
-		len(token) > 8192 || strings.ContainsAny(token, " \r\n\t") {
+		strings.Contains(endpoint, "#") || (!allowQuery && (target.RawQuery != "" || target.ForceQuery)) ||
+		(target.Scheme != "https" && target.Scheme != "http") {
 		return nil, ErrInvalid
 	}
 	host := target.Hostname()
@@ -198,8 +197,16 @@ func (c *Client) open(ctx context.Context, endpoint, token string) (*session, er
 	if addressErr == nil && !c.policy.allowsAddress(address) {
 		return nil, ErrInvalid
 	}
-	if target.Scheme == "http" && token != "" &&
+	if target.Scheme == "http" && credentials &&
 		(c.policy != NetworkLocal || !(isLocalhost(host) || address.Unmap().IsLoopback())) {
+		return nil, ErrInvalid
+	}
+	return target, nil
+}
+
+func (c *Client) open(ctx context.Context, endpoint, token string) (*session, error) {
+	target, err := c.target(endpoint, token != "", false)
+	if err != nil || len(token) > 8192 || strings.ContainsAny(token, " \r\n\t") {
 		return nil, ErrInvalid
 	}
 	s := &session{http: c.http, endpoint: target.String(), token: token}
@@ -290,8 +297,23 @@ func (s *session) post(ctx context.Context, id int, method string, params, resul
 	}
 	defer response.Body.Close()
 	switch response.StatusCode {
-	case http.StatusUnauthorized, http.StatusForbidden:
+	case http.StatusUnauthorized:
+		if method == "initialize" {
+			if challenge := bearerChallenge(response.Header.Values("WWW-Authenticate")); challenge["resource_metadata"] != "" {
+				return errors.Join(ErrUnauthorized, ErrOAuthRequired)
+			}
+		}
 		return ErrUnauthorized
+	case http.StatusForbidden:
+		challenge := bearerChallenge(response.Header.Values("WWW-Authenticate"))
+		if challenge["error"] == "insufficient_scope" {
+			scope := challenge["scope"]
+			if !validOAuthScope(scope) {
+				scope = ""
+			}
+			return &InsufficientScopeError{Scope: scope}
+		}
+		return ErrForbidden
 	case http.StatusAccepted:
 		if id == 0 {
 			return nil

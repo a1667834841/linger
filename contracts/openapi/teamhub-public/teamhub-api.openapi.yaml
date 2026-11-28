@@ -2443,6 +2443,10 @@ paths:
     $ref: '../paths/custom-mcp-connections.yaml#/paths/~1v0~1custom-mcp-connections'
   /v0/custom-mcp-connections/test:
     $ref: '../paths/custom-mcp-connections.yaml#/paths/~1v0~1custom-mcp-connections~1test'
+  /v0/custom-mcp-connections/oauth/start:
+    $ref: '../paths/custom-mcp-connections.yaml#/paths/~1v0~1custom-mcp-connections~1oauth~1start'
+  /v0/custom-mcp-connections/oauth/callback:
+    $ref: '../paths/custom-mcp-connections.yaml#/paths/~1v0~1custom-mcp-connections~1oauth~1callback'
   /v0/custom-mcp-connections/{connectionId}:
     $ref: '../paths/custom-mcp-connections.yaml#/paths/~1v0~1custom-mcp-connections~1{connectionId}'
   /v0/external-connections:

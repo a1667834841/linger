@@ -29,6 +29,14 @@ export type CustomMCPInput =
 export type CustomMCPConnection =
   CustomMCPPaths["post"]["responses"][200]["content"]["application/json"];
 export type CustomMCPTool = CustomMCPConnection["tools"][number];
+type CustomMCPOAuthStart =
+  paths["/v0/custom-mcp-connections/oauth/start"]["post"];
+export type CustomMCPOAuthInput =
+  CustomMCPOAuthStart["requestBody"]["content"]["application/json"];
+export type CustomMCPOAuthAttempt =
+  CustomMCPOAuthStart["responses"][200]["content"]["application/json"];
+export type CustomMCPOAuthResponse =
+  paths["/v0/custom-mcp-connections/oauth/callback"]["post"]["requestBody"]["content"]["application/json"];
 
 export interface TeamHubExternalSourceClient {
   listCustomMCP(): Promise<{ connections: CustomMCPConnection[] }>;
@@ -38,6 +46,10 @@ export interface TeamHubExternalSourceClient {
     token: string,
   ): Promise<{ tools: CustomMCPTool[] }>;
   deleteCustomMCP(connectionId: string): Promise<void>;
+  startCustomMCPOAuth(
+    input: CustomMCPOAuthInput,
+  ): Promise<CustomMCPOAuthAttempt>;
+  completeCustomMCPOAuth(input: CustomMCPOAuthResponse): Promise<void>;
   /** Tells TeamHub an OAuth popup returned, so it checks the authorization at once. */
   completeExternalConnectionAuthorization(
     connectedAccountId?: string,
@@ -111,6 +123,18 @@ export function createHttpTeamHubExternalSourceClient(
     listCustomMCP: () => data(api.GET("/v0/custom-mcp-connections")),
     saveCustomMCP: (body) =>
       data(api.POST("/v0/custom-mcp-connections", { body })),
+    startCustomMCPOAuth: async (body) => {
+      const url = await desktopConnectorOAuth()?.prepareCustomMCP?.(
+        body.endpoint,
+      );
+      return data(
+        api.POST("/v0/custom-mcp-connections/oauth/start", {
+          body: { ...body, desktop_callback_url: url },
+        }),
+      );
+    },
+    completeCustomMCPOAuth: (body) =>
+      done(api.POST("/v0/custom-mcp-connections/oauth/callback", { body })),
     testCustomMCP: (endpoint, token) =>
       data(
         api.POST("/v0/custom-mcp-connections/test", {

@@ -14,6 +14,13 @@ const worded: Readonly<Record<string, Message<string>>> = {
   INTERNAL_ERROR: m.internal,
   // TeamHub always sends the same sentence for this code.
   LOCAL_COMPUTER_OFFLINE: m.computerOffline,
+  CUSTOM_MCP_OAUTH_REQUIRED: m.customMcpOAuthRequired,
+  CUSTOM_MCP_REAUTHORIZATION_REQUIRED: m.customMcpReauthorizationRequired,
+  CUSTOM_MCP_OAUTH_METADATA_INVALID: m.customMcpOAuthMetadataInvalid,
+  CUSTOM_MCP_OAUTH_RESPONSE_INVALID: m.customMcpOAuthResponseInvalid,
+  CUSTOM_MCP_OAUTH_STATE_INVALID: m.customMcpOAuthStateInvalid,
+  CUSTOM_MCP_OAUTH_REGISTRATION_REQUIRED: m.customMcpOAuthRegistrationRequired,
+  CUSTOM_MCP_OAUTH_BINDING_CHANGED: m.customMcpOAuthBindingChanged,
 };
 
 /**

@@ -27,6 +27,22 @@ export const connectorMessages = defineMessages("connectors", {
   customConnectorNoTools: "The MCP server returned no tools.",
   customConnectorTest: "Test connection",
   customConnectorTestedOnSave: "Saving also tests the connection.",
+  customConnectorAuthentication: "Authentication",
+  customConnectorBearerOrAnonymous: "Anonymous or Bearer token",
+  customConnectorOAuth: "OAuth",
+  customConnectorAuthorize: "Authorize",
+  customConnectorReauthorize: "Reauthorize",
+  customConnectorOAuthExpired:
+    "Authorization expired or was rejected. Authorize again.",
+  customConnectorOAuthMoreAccess:
+    "This connector needs additional permissions.",
+  customConnectorOAuthWaiting: "Complete authorization in the browser window.",
+  customConnectorScope: "OAuth scopes (optional, space-separated)",
+  customConnectorManualClient: "Use a registered OAuth client",
+  customConnectorClientID: "OAuth client ID",
+  customConnectorClientSecret: "OAuth client secret (optional)",
+  customConnectorRedirectURI: "OAuth redirect URI",
+  customConnectorShowRedirectURI: "Show redirect URI",
   customConnectorDisconnect: "Disconnect custom connector",
 
   // Groups of the catalog

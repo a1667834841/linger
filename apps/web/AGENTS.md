@@ -4,6 +4,8 @@ React Router Data Mode and TanStack Query power the active Room-first UI.
 
 The Connectors page manages custom Streamable HTTP MCP endpoints. A Human can
 test an endpoint, save its tool catalog, edit its credentials, and disconnect it.
+OAuth opens in a separate browser window. The form shows the registered client
+redirect URI and prompts for reauthorization when a token or scope is rejected.
 Agent info uses the same per-Agent grant controls for managed and custom
 connectors.
 

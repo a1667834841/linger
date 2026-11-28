@@ -46,11 +46,8 @@ import {
 import { ConnectAppStatus, useConnectAppFlow } from "./connect-app-flow";
 import { connectorMessages as m } from "./connectors.messages";
 import type { CustomMCPConnection } from "@/features/teamhub/teamhub-external-source-client";
-import {
-  CustomMCPDialog,
-  CustomMCPSection,
-  customMCPQueryOptions,
-} from "./custom-mcp-connectors";
+import { CustomMCPDialog, CustomMCPSection } from "./custom-mcp-connectors";
+import { customMCPQueryOptions } from "./custom-mcp-queries";
 import { WebSearchSection } from "./web-search-connectors";
 
 const APP_GRID_CLASS = "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3";

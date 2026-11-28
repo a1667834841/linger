@@ -38,6 +38,8 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CustomMcpConnection" }
+        "409":
+          $ref: "#/components/responses/CustomMcpAuthorizationRequired"
   /v0/custom-mcp-connections/test:
     post:
       operationId: testCustomMcpConnection
@@ -63,6 +65,89 @@ paths:
                   tools:
                     type: array
                     items: { $ref: "#/components/schemas/CustomMcpTool" }
+        "409":
+          $ref: "#/components/responses/CustomMcpAuthorizationRequired"
+  /v0/custom-mcp-connections/oauth/start:
+    post:
+      operationId: startCustomMcpOAuth
+      summary: Start OAuth for a new connector or replace credentials at the given revision.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, endpoint]
+              properties:
+                id: { type: string }
+                revision: { type: integer, format: int64 }
+                name: { type: string, minLength: 1, maxLength: 160 }
+                endpoint: { type: string, format: uri }
+                desktop_callback_url:
+                  $ref: "../components/external-sources.yaml#/components/schemas/ExternalConnectionDesktopCallbackURL"
+                client_id: { type: string, maxLength: 8192 }
+                client_secret:
+                  type: string
+                  maxLength: 8192
+                  writeOnly: true
+                  description: Omit to retain the secret for the same saved client and endpoint.
+                scope: { type: string, maxLength: 4096 }
+                redirect_only:
+                  type: boolean
+                  description: Return the exact redirect URI for manual client registration without starting authorization.
+      responses:
+        "200":
+          description: An owner-bound attempt. The connector is saved after authorization and tool discovery.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [redirect_uri]
+                properties:
+                  connection_id: { type: string }
+                  authorization_url: { type: string, format: uri }
+                  expires_at: { type: string, format: date-time }
+                  redirect_uri: { type: string, format: uri }
+        "400":
+          $ref: "#/components/responses/CustomMcpOAuthError"
+        "409":
+          $ref: "../components/common.yaml#/components/responses/Conflict"
+  /v0/custom-mcp-connections/oauth/callback:
+    get:
+      operationId: receiveCustomMcpOAuthCallback
+      summary: Complete an OAuth attempt returned to the public Web origin.
+      parameters:
+        - { name: state, in: query, required: true, schema: { type: string } }
+        - {
+            name: callback_id,
+            in: query,
+            required: true,
+            schema: { type: string },
+          }
+        - { name: code, in: query, schema: { type: string } }
+        - { name: iss, in: query, schema: { type: string } }
+        - { name: error, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: The verified connector was saved.
+          content:
+            text/html:
+              schema: { type: string }
+        "400":
+          $ref: "#/components/responses/CustomMcpOAuthError"
+    post:
+      operationId: completeCustomMcpOAuth
+      summary: Complete an OAuth attempt returned to the Desktop loopback receiver.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomMcpOAuthCallback" }
+      responses:
+        "204":
+          description: The verified connector was saved.
+        "400":
+          $ref: "#/components/responses/CustomMcpOAuthError"
   /v0/custom-mcp-connections/{connectionId}:
     delete:
       operationId: deleteCustomMcpConnection
@@ -75,7 +160,52 @@ paths:
         "204":
           description: The connection was revoked and its credentials removed.
 components:
+  responses:
+    CustomMcpAuthorizationRequired:
+      description: The connector requires OAuth authorization or its current OAuth authorization has expired.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/CustomMcpErrorResponse" }
+    CustomMcpOAuthError:
+      description: Invalid configuration, provider metadata, authorization response, or one-time state.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/CustomMcpErrorResponse" }
   schemas:
+    CustomMcpErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id]
+          properties:
+            code:
+              type: string
+              enum:
+                - INVALID_REQUEST
+                - CUSTOM_MCP_OAUTH_REQUIRED
+                - CUSTOM_MCP_REAUTHORIZATION_REQUIRED
+                - CUSTOM_MCP_OAUTH_METADATA_INVALID
+                - CUSTOM_MCP_OAUTH_RESPONSE_INVALID
+                - CUSTOM_MCP_OAUTH_STATE_INVALID
+                - CUSTOM_MCP_OAUTH_REGISTRATION_REQUIRED
+                - CUSTOM_MCP_OAUTH_BINDING_CHANGED
+            message: { type: string }
+            request_id: { type: string }
+            details:
+              type: array
+              items:
+                $ref: "../components/common.yaml#/components/schemas/ErrorDetail"
+    CustomMcpOAuthCallback:
+      type: object
+      required: [state, callback_id]
+      properties:
+        state: { type: string }
+        callback_id: { type: string }
+        code: { type: string }
+        iss: { type: string }
+        error: { type: string }
     CustomMcpConnection:
       type: object
       required: [id, name, endpoint, has_token, revision, tools]
@@ -85,6 +215,24 @@ components:
         endpoint: { type: string, format: uri }
         has_token: { type: boolean }
         revision: { type: integer, format: int64 }
+        auth_method:
+          type: string
+          enum: [bearer, oauth]
+          description: Bearer mode also permits anonymous access when no token is saved. Omission means bearer.
+        authorization_status:
+          type: string
+          enum: [ready, reauthorization_required, additional_scope_required]
+          description: Omission means ready.
+        token_expires_at: { type: string, format: date-time }
+        granted_scope: { type: string }
+        requested_scope: { type: string }
+        required_scope: { type: string }
+        oauth_client_id:
+          type: string
+          description: The client ID for a manually registered connector.
+        oauth_registration:
+          type: string
+          enum: [dynamic, manual]
         tools:
           type: array
           items: { $ref: "#/components/schemas/CustomMcpTool" }

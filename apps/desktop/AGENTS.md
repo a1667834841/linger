@@ -50,6 +50,9 @@ Gateway and runs Agents. The daemon exits with the app.
   expiring, one-time IPv4 loopback callback before TeamHub creates the link.
   The callback restores the originating window and forwards the return to its
   signed-in SPA, which requests TeamHub verification.
+  Custom MCP uses a stable callback path per endpoint while the listener is
+  running. TeamHub consumes each authorization state's code once. An issuer
+  that requires manual native registration must accept variable loopback ports.
 
 - The Web link preview panel shows other sites in native views
   (`src/main/preview-views.ts`, `preview.view` in the preload API). Each is a

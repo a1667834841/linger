@@ -884,6 +884,99 @@ func (e CurrentIdentityServerCapabilities) Valid() bool {
 	}
 }
 
+// Defines values for CustomMcpConnectionAuthMethod.
+const (
+	Bearer CustomMcpConnectionAuthMethod = "bearer"
+	Oauth  CustomMcpConnectionAuthMethod = "oauth"
+)
+
+// Valid indicates whether the value is a known member of the CustomMcpConnectionAuthMethod enum.
+func (e CustomMcpConnectionAuthMethod) Valid() bool {
+	switch e {
+	case Bearer:
+		return true
+	case Oauth:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CustomMcpConnectionAuthorizationStatus.
+const (
+	CustomMcpConnectionAuthorizationStatusAdditionalScopeRequired CustomMcpConnectionAuthorizationStatus = "additional_scope_required"
+	CustomMcpConnectionAuthorizationStatusReady                   CustomMcpConnectionAuthorizationStatus = "ready"
+	CustomMcpConnectionAuthorizationStatusReauthorizationRequired CustomMcpConnectionAuthorizationStatus = "reauthorization_required"
+)
+
+// Valid indicates whether the value is a known member of the CustomMcpConnectionAuthorizationStatus enum.
+func (e CustomMcpConnectionAuthorizationStatus) Valid() bool {
+	switch e {
+	case CustomMcpConnectionAuthorizationStatusAdditionalScopeRequired:
+		return true
+	case CustomMcpConnectionAuthorizationStatusReady:
+		return true
+	case CustomMcpConnectionAuthorizationStatusReauthorizationRequired:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CustomMcpConnectionOauthRegistration.
+const (
+	CustomMcpConnectionOauthRegistrationDynamic CustomMcpConnectionOauthRegistration = "dynamic"
+	CustomMcpConnectionOauthRegistrationManual  CustomMcpConnectionOauthRegistration = "manual"
+)
+
+// Valid indicates whether the value is a known member of the CustomMcpConnectionOauthRegistration enum.
+func (e CustomMcpConnectionOauthRegistration) Valid() bool {
+	switch e {
+	case CustomMcpConnectionOauthRegistrationDynamic:
+		return true
+	case CustomMcpConnectionOauthRegistrationManual:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CustomMcpErrorResponseErrorCode.
+const (
+	CUSTOMMCPOAUTHBINDINGCHANGED       CustomMcpErrorResponseErrorCode = "CUSTOM_MCP_OAUTH_BINDING_CHANGED"
+	CUSTOMMCPOAUTHMETADATAINVALID      CustomMcpErrorResponseErrorCode = "CUSTOM_MCP_OAUTH_METADATA_INVALID"
+	CUSTOMMCPOAUTHREGISTRATIONREQUIRED CustomMcpErrorResponseErrorCode = "CUSTOM_MCP_OAUTH_REGISTRATION_REQUIRED"
+	CUSTOMMCPOAUTHREQUIRED             CustomMcpErrorResponseErrorCode = "CUSTOM_MCP_OAUTH_REQUIRED"
+	CUSTOMMCPOAUTHRESPONSEINVALID      CustomMcpErrorResponseErrorCode = "CUSTOM_MCP_OAUTH_RESPONSE_INVALID"
+	CUSTOMMCPOAUTHSTATEINVALID         CustomMcpErrorResponseErrorCode = "CUSTOM_MCP_OAUTH_STATE_INVALID"
+	CUSTOMMCPREAUTHORIZATIONREQUIRED   CustomMcpErrorResponseErrorCode = "CUSTOM_MCP_REAUTHORIZATION_REQUIRED"
+	INVALIDREQUEST                     CustomMcpErrorResponseErrorCode = "INVALID_REQUEST"
+)
+
+// Valid indicates whether the value is a known member of the CustomMcpErrorResponseErrorCode enum.
+func (e CustomMcpErrorResponseErrorCode) Valid() bool {
+	switch e {
+	case CUSTOMMCPOAUTHBINDINGCHANGED:
+		return true
+	case CUSTOMMCPOAUTHMETADATAINVALID:
+		return true
+	case CUSTOMMCPOAUTHREGISTRATIONREQUIRED:
+		return true
+	case CUSTOMMCPOAUTHREQUIRED:
+		return true
+	case CUSTOMMCPOAUTHRESPONSEINVALID:
+		return true
+	case CUSTOMMCPOAUTHSTATEINVALID:
+		return true
+	case CUSTOMMCPREAUTHORIZATIONREQUIRED:
+		return true
+	case INVALIDREQUEST:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DecisionAnswerDecision.
 const (
 	DecisionAnswerApprove    DecisionAnswerDecision = "approve"
@@ -5779,12 +5872,56 @@ type Cursor = string
 
 // CustomMcpConnection defines model for CustomMcpConnection.
 type CustomMcpConnection struct {
-	Endpoint string          `json:"endpoint"`
-	HasToken bool            `json:"has_token"`
-	Id       string          `json:"id"`
-	Name     string          `json:"name"`
-	Revision int64           `json:"revision"`
-	Tools    []CustomMcpTool `json:"tools"`
+	// AuthMethod Bearer mode also permits anonymous access when no token is saved. Omission means bearer.
+	AuthMethod *CustomMcpConnectionAuthMethod `json:"auth_method,omitempty"`
+
+	// AuthorizationStatus Omission means ready.
+	AuthorizationStatus *CustomMcpConnectionAuthorizationStatus `json:"authorization_status,omitempty"`
+	Endpoint            string                                  `json:"endpoint"`
+	GrantedScope        *string                                 `json:"granted_scope,omitempty"`
+	HasToken            bool                                    `json:"has_token"`
+	Id                  string                                  `json:"id"`
+	Name                string                                  `json:"name"`
+
+	// OauthClientId The client ID for a manually registered connector.
+	OauthClientId     *string                               `json:"oauth_client_id,omitempty"`
+	OauthRegistration *CustomMcpConnectionOauthRegistration `json:"oauth_registration,omitempty"`
+	RequestedScope    *string                               `json:"requested_scope,omitempty"`
+	RequiredScope     *string                               `json:"required_scope,omitempty"`
+	Revision          int64                                 `json:"revision"`
+	TokenExpiresAt    *time.Time                            `json:"token_expires_at,omitempty"`
+	Tools             []CustomMcpTool                       `json:"tools"`
+}
+
+// CustomMcpConnectionAuthMethod Bearer mode also permits anonymous access when no token is saved. Omission means bearer.
+type CustomMcpConnectionAuthMethod string
+
+// CustomMcpConnectionAuthorizationStatus Omission means ready.
+type CustomMcpConnectionAuthorizationStatus string
+
+// CustomMcpConnectionOauthRegistration defines model for CustomMcpConnection.OauthRegistration.
+type CustomMcpConnectionOauthRegistration string
+
+// CustomMcpErrorResponse defines model for CustomMcpErrorResponse.
+type CustomMcpErrorResponse struct {
+	Error struct {
+		Code      CustomMcpErrorResponseErrorCode `json:"code"`
+		Details   *[]ErrorDetail                  `json:"details,omitempty"`
+		Message   string                          `json:"message"`
+		RequestId string                          `json:"request_id"`
+	} `json:"error"`
+}
+
+// CustomMcpErrorResponseErrorCode defines model for CustomMcpErrorResponse.Error.Code.
+type CustomMcpErrorResponseErrorCode string
+
+// CustomMcpOAuthCallback defines model for CustomMcpOAuthCallback.
+type CustomMcpOAuthCallback struct {
+	CallbackId string  `json:"callback_id"`
+	Code       *string `json:"code,omitempty"`
+	Error      *string `json:"error,omitempty"`
+	Iss        *string `json:"iss,omitempty"`
+	State      string  `json:"state"`
 }
 
 // CustomMcpTool defines model for CustomMcpTool.
@@ -10558,6 +10695,12 @@ type BadRequest = ErrorResponse
 // Conflict defines model for Conflict.
 type Conflict = ErrorResponse
 
+// CustomMcpAuthorizationRequired defines model for CustomMcpAuthorizationRequired.
+type CustomMcpAuthorizationRequired = CustomMcpErrorResponse
+
+// CustomMcpOAuthError defines model for CustomMcpOAuthError.
+type CustomMcpOAuthError = CustomMcpErrorResponse
+
 // FileError defines model for FileError.
 type FileError struct {
 	Error struct {
@@ -10617,6 +10760,34 @@ type SaveCustomMcpConnectionJSONBody struct {
 
 	// Token Omit on edit to retain the token for the same endpoint. Send an empty value to remove it.
 	Token *string `json:"token,omitempty"`
+}
+
+// ReceiveCustomMcpOAuthCallbackParams defines parameters for ReceiveCustomMcpOAuthCallback.
+type ReceiveCustomMcpOAuthCallbackParams struct {
+	State      string  `form:"state" json:"state"`
+	CallbackId string  `form:"callback_id" json:"callback_id"`
+	Code       *string `form:"code,omitempty" json:"code,omitempty"`
+	Iss        *string `form:"iss,omitempty" json:"iss,omitempty"`
+	Error      *string `form:"error,omitempty" json:"error,omitempty"`
+}
+
+// StartCustomMcpOAuthJSONBody defines parameters for StartCustomMcpOAuth.
+type StartCustomMcpOAuthJSONBody struct {
+	ClientId *string `json:"client_id,omitempty"`
+
+	// ClientSecret Omit to retain the secret for the same saved client and endpoint.
+	ClientSecret *string `json:"client_secret,omitempty"`
+
+	// DesktopCallbackUrl One-time OAuth return address on the desktop client's IPv4 loopback listener.
+	DesktopCallbackUrl *ExternalConnectionDesktopCallbackURL `json:"desktop_callback_url,omitempty"`
+	Endpoint           string                                `json:"endpoint"`
+	Id                 *string                               `json:"id,omitempty"`
+	Name               string                                `json:"name"`
+
+	// RedirectOnly Return the exact redirect URI for manual client registration without starting authorization.
+	RedirectOnly *bool   `json:"redirect_only,omitempty"`
+	Revision     *int64  `json:"revision,omitempty"`
+	Scope        *string `json:"scope,omitempty"`
 }
 
 // TestCustomMcpConnectionJSONBody defines parameters for TestCustomMcpConnection.
@@ -11065,6 +11236,12 @@ type LoginJSONRequestBody = LoginRequest
 
 // SaveCustomMcpConnectionJSONRequestBody defines body for SaveCustomMcpConnection for application/json ContentType.
 type SaveCustomMcpConnectionJSONRequestBody SaveCustomMcpConnectionJSONBody
+
+// CompleteCustomMcpOAuthJSONRequestBody defines body for CompleteCustomMcpOAuth for application/json ContentType.
+type CompleteCustomMcpOAuthJSONRequestBody = CustomMcpOAuthCallback
+
+// StartCustomMcpOAuthJSONRequestBody defines body for StartCustomMcpOAuth for application/json ContentType.
+type StartCustomMcpOAuthJSONRequestBody StartCustomMcpOAuthJSONBody
 
 // TestCustomMcpConnectionJSONRequestBody defines body for TestCustomMcpConnection for application/json ContentType.
 type TestCustomMcpConnectionJSONRequestBody TestCustomMcpConnectionJSONBody

@@ -34,7 +34,7 @@ import {
   externalConnectionAgentAccessQueryOptions,
 } from "./connected-apps-queries";
 import { connectorMessages as m } from "./connectors.messages";
-import { customMCPQueryOptions } from "./custom-mcp-connectors";
+import { customMCPQueryOptions } from "./custom-mcp-queries";
 
 export function AgentConnectors({
   agentActorId,
