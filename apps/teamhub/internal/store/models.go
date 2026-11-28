@@ -451,6 +451,36 @@ type ComposioSetting struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CustomMcpConnection struct {
+	ConnectionID             string             `json:"connection_id"`
+	TenantID                 string             `json:"tenant_id"`
+	OwnerActorID             string             `json:"owner_actor_id"`
+	Endpoint                 string             `json:"endpoint"`
+	EncryptedToken           []byte             `json:"encrypted_token"`
+	Tools                    []byte             `json:"tools"`
+	AuthMethod               string             `json:"auth_method"`
+	OauthClientID            pgtype.Text        `json:"oauth_client_id"`
+	OauthIssuer              pgtype.Text        `json:"oauth_issuer"`
+	OauthCredentials         []byte             `json:"oauth_credentials"`
+	OauthRegistration        pgtype.Text        `json:"oauth_registration"`
+	OauthRegistrationInvalid bool               `json:"oauth_registration_invalid"`
+	OauthRefreshable         bool               `json:"oauth_refreshable"`
+	OauthExpiresAt           pgtype.Timestamptz `json:"oauth_expires_at"`
+	OauthScope               pgtype.Text        `json:"oauth_scope"`
+	OauthRequestedScope      pgtype.Text        `json:"oauth_requested_scope"`
+	OauthRejected            bool               `json:"oauth_rejected"`
+	OauthRequiredScope       pgtype.Text        `json:"oauth_required_scope"`
+}
+
+type CustomMcpOauthAttempt struct {
+	StateHash        []byte             `json:"state_hash"`
+	AccountID        string             `json:"account_id"`
+	TenantID         string             `json:"tenant_id"`
+	OwnerActorID     string             `json:"owner_actor_id"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
+	EncryptedAttempt []byte             `json:"encrypted_attempt"`
+}
+
 type Decision struct {
 	ID                  string             `json:"id"`
 	TenantID            string             `json:"tenant_id"`
