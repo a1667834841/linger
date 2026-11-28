@@ -250,7 +250,8 @@ func (s *Service) checkCustomMCPOAuthRevision(ctx context.Context, owner customM
 
 func oauthRandom() string {
 	var random [32]byte
-	rand.Read(random[:])
+	// crypto/rand.Read never returns an error: it ends the process if the system source fails.
+	_, _ = rand.Read(random[:])
 	return base64.RawURLEncoding.EncodeToString(random[:])
 }
 

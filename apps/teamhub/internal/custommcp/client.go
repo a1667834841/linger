@@ -67,6 +67,7 @@ func newRPCError(raw json.RawMessage) *RPCError {
 		Message string `json:"message"`
 	}
 	if json.Unmarshal(raw, &payload) != nil {
+		//nolint:nilerr // A malformed error object is not an RPCError; the caller reports the server as unavailable.
 		return nil
 	}
 	message := strings.Map(func(r rune) rune {
@@ -330,7 +331,7 @@ func (s *session) close(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	if response, err := s.request(ctx, http.MethodDelete, nil); err == nil {
-		response.Body.Close()
+		_ = response.Body.Close()
 	}
 }
 
@@ -397,6 +398,7 @@ func decodeReply(response *http.Response, id int, result any) error {
 			Error   json.RawMessage `json:"error"`
 		}
 		if json.Unmarshal(raw, &reply) != nil || reply.JSONRPC != "2.0" || reply.ID != id {
+			//nolint:nilerr // A frame that is not this call's reply is skipped, not an error.
 			return false, nil
 		}
 		if len(reply.Error) != 0 {

@@ -26,9 +26,9 @@ func TestOAuthDiscoveryRegistrationAndExchange(t *testing.T) {
 			w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Basic realm="other", Bearer scope="read write", resource_metadata="%s/resource"`, origin))
 			w.WriteHeader(http.StatusUnauthorized)
 		case "/resource":
-			json.NewEncoder(w).Encode(resourceMetadata{Resource: origin + "/mcp", Servers: []string{origin, "https://ignored.example"}, Scopes: []string{"all"}})
+			_ = json.NewEncoder(w).Encode(resourceMetadata{Resource: origin + "/mcp", Servers: []string{origin, "https://ignored.example"}, Scopes: []string{"all"}})
 		case "/.well-known/oauth-authorization-server":
-			json.NewEncoder(w).Encode(authorizationServer{
+			_ = json.NewEncoder(w).Encode(authorizationServer{
 				Issuer: origin, Authorization: origin + "/authorize", Token: origin + "/token", Register: origin + "/register",
 				PKCE: []string{"S256"}, AuthMethods: []string{"none"}, Grants: []string{"authorization_code", "refresh_token"},
 				RequiresIssuer: true,
@@ -46,7 +46,7 @@ func TestOAuthDiscoveryRegistrationAndExchange(t *testing.T) {
 				t.Error("invalid registration")
 			}
 			w.WriteHeader(http.StatusCreated)
-			fmt.Fprint(w, `{"client_id":"registered"}`)
+			_, _ = fmt.Fprint(w, `{"client_id":"registered"}`)
 		case "/token":
 			exchanges.Add(1)
 			if err := r.ParseForm(); err != nil || r.Form.Get("resource") != origin+"/mcp" ||
@@ -54,7 +54,7 @@ func TestOAuthDiscoveryRegistrationAndExchange(t *testing.T) {
 				r.Form.Get("redirect_uri") != "https://web.example/callback" || r.Form.Get("code") != "provider-code" {
 				t.Error("invalid token exchange parameters")
 			}
-			fmt.Fprint(w, `{"access_token":"access-fixture","refresh_token":"refresh-fixture","token_type":"Bearer","expires_in":3600,"scope":"read"}`)
+			_, _ = fmt.Fprint(w, `{"access_token":"access-fixture","refresh_token":"refresh-fixture","token_type":"Bearer","expires_in":3600,"scope":"read"}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -124,11 +124,11 @@ func TestOAuthWellKnownFallbackAndManualClient(t *testing.T) {
 					w.Header().Set("WWW-Authenticate", "Bearer")
 					w.WriteHeader(http.StatusUnauthorized)
 				case "/.well-known/oauth-protected-resource":
-					json.NewEncoder(w).Encode(resourceMetadata{Resource: origin + "/mcp", Servers: []string{origin + "/tenant"}, Scopes: []string{"read"}})
+					_ = json.NewEncoder(w).Encode(resourceMetadata{Resource: origin + "/mcp", Servers: []string{origin + "/tenant"}, Scopes: []string{"read"}})
 				case "/tenant/.well-known/openid-configuration":
-					json.NewEncoder(w).Encode(authorizationServer{Issuer: origin + "/tenant", Authorization: origin + "/authorize", Token: origin + "/token", PKCE: []string{"S256"}, AuthMethods: []string{method}})
+					_ = json.NewEncoder(w).Encode(authorizationServer{Issuer: origin + "/tenant", Authorization: origin + "/authorize", Token: origin + "/token", PKCE: []string{"S256"}, AuthMethods: []string{method}})
 				case "/token":
-					r.ParseForm()
+					_ = r.ParseForm()
 					user, password, basic := r.BasicAuth()
 					switch method {
 					case "client_secret_basic":
@@ -146,10 +146,10 @@ func TestOAuthWellKnownFallbackAndManualClient(t *testing.T) {
 					}
 					if r.Form.Get("grant_type") == "refresh_token" {
 						w.WriteHeader(http.StatusBadRequest)
-						fmt.Fprint(w, `{"error":"invalid_grant"}`)
+						_, _ = fmt.Fprint(w, `{"error":"invalid_grant"}`)
 						return
 					}
-					fmt.Fprint(w, `{"token_type":"Bearer","access_token":"manual-access"}`)
+					_, _ = fmt.Fprint(w, `{"token_type":"Bearer","access_token":"manual-access"}`)
 				default:
 					http.NotFound(w, r)
 				}
@@ -219,12 +219,12 @@ func TestOAuthRejectsUnsafeMetadataAndRedirects(t *testing.T) {
 					if scenario == "first issuer only" {
 						metadata.Servers = []string{"https://192.0.2.1", origin}
 					}
-					json.NewEncoder(w).Encode(metadata)
+					_ = json.NewEncoder(w).Encode(metadata)
 				case "/.well-known/oauth-authorization-server":
 					if scenario != "wrong issuer" {
 						deniedCalls.Add(1)
 					}
-					json.NewEncoder(w).Encode(authorizationServer{Issuer: origin + "/other"})
+					_ = json.NewEncoder(w).Encode(authorizationServer{Issuer: origin + "/other"})
 				default:
 					deniedCalls.Add(1)
 				}

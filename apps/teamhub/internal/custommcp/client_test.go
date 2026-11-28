@@ -138,7 +138,7 @@ func TestDiscoverAndCallStreamableHTTP(t *testing.T) {
 			t.Error("session headers do not reflect negotiated session")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		result := ""
+		var result string
 		switch request.Method {
 		case "initialize":
 			w.Header().Set("MCP-Session-Id", "fixture-session")
@@ -160,8 +160,8 @@ func TestDiscoverAndCallStreamableHTTP(t *testing.T) {
 				t.Errorf("unexpected call parameters: %#v", request.Params)
 			}
 			w.Header().Set("Content-Type", "text/event-stream")
-			fmt.Fprint(w, "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\"}\n\n")
-			fmt.Fprintf(w, "data: {\"jsonrpc\":\"2.0\",\"id\":%d,\ndata: \"result\":{\"content\":[]}}\n\n", request.ID)
+			_, _ = fmt.Fprint(w, "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\"}\n\n")
+			_, _ = fmt.Fprintf(w, "data: {\"jsonrpc\":\"2.0\",\"id\":%d,\ndata: \"result\":{\"content\":[]}}\n\n", request.ID)
 			w.(http.Flusher).Flush()
 			<-r.Context().Done()
 			return
@@ -170,7 +170,7 @@ func TestDiscoverAndCallStreamableHTTP(t *testing.T) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":%s}`, request.ID, result)
+		_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":%s}`, request.ID, result)
 	}))
 	defer server.Close()
 	// Only the fixture bypasses the production public-address dialer.
@@ -270,14 +270,14 @@ func TestLocalHTTPDiscovery(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch request.Method {
 		case "initialize":
-			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}}}}`, request.ID)
+			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}}}}`, request.ID)
 		case "notifications/initialized":
 			w.WriteHeader(http.StatusAccepted)
 		case "tools/list":
 			if r.Header.Get("MCP-Protocol-Version") != protocol {
 				t.Error("stateless requests must carry the negotiated protocol")
 			}
-			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"tools":[]}}`, request.ID)
+			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"tools":[]}}`, request.ID)
 		default:
 			t.Errorf("unexpected method %s", request.Method)
 			w.WriteHeader(http.StatusBadRequest)

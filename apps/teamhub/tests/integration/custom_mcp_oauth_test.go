@@ -36,16 +36,16 @@ func TestCustomMCPOAuthCallbackRefreshAndReauthorization(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/resource":
-			fmt.Fprintf(w, `{"resource":%q,"authorization_servers":[%q],"scopes_supported":["read"]}`, origin+"/mcp", origin)
+			_, _ = fmt.Fprintf(w, `{"resource":%q,"authorization_servers":[%q],"scopes_supported":["read"]}`, origin+"/mcp", origin)
 		case "/.well-known/oauth-authorization-server":
-			fmt.Fprintf(w, `{"issuer":%q,"authorization_endpoint":%q,"token_endpoint":%q,"registration_endpoint":%q,"revocation_endpoint":%q,"code_challenge_methods_supported":["S256"],"authorization_response_iss_parameter_supported":true,"token_endpoint_auth_methods_supported":["none"],"grant_types_supported":["authorization_code","refresh_token"]}`,
+			_, _ = fmt.Fprintf(w, `{"issuer":%q,"authorization_endpoint":%q,"token_endpoint":%q,"registration_endpoint":%q,"revocation_endpoint":%q,"code_challenge_methods_supported":["S256"],"authorization_response_iss_parameter_supported":true,"token_endpoint_auth_methods_supported":["none"],"grant_types_supported":["authorization_code","refresh_token"]}`,
 				origin, origin+"/authorize", origin+"/token", origin+"/register", origin+"/revoke")
 		case "/register":
 			registrations.Add(1)
 			w.WriteHeader(http.StatusCreated)
-			fmt.Fprint(w, `{"client_id":"fixture-client"}`)
+			_, _ = fmt.Fprint(w, `{"client_id":"fixture-client"}`)
 		case "/token":
-			r.ParseForm()
+			_ = r.ParseForm()
 			if r.Form.Get("resource") != origin+"/mcp" || r.Form.Get("client_id") != "fixture-client" {
 				t.Error("token request missing resource or client binding")
 			}
@@ -56,13 +56,13 @@ func TestCustomMCPOAuthCallbackRefreshAndReauthorization(t *testing.T) {
 				if !removeRefresh.Load() {
 					fields["refresh_token"] = "refresh-original"
 				}
-				json.NewEncoder(w).Encode(fields)
+				_ = json.NewEncoder(w).Encode(fields)
 				return
 			}
 			n := refreshes.Add(1)
 			if rejectRefresh.Load() {
 				w.WriteHeader(http.StatusBadRequest)
-				fmt.Fprint(w, `{"error":"invalid_grant"}`)
+				_, _ = fmt.Fprint(w, `{"error":"invalid_grant"}`)
 				return
 			}
 			want := "refresh-original"
@@ -73,7 +73,7 @@ func TestCustomMCPOAuthCallbackRefreshAndReauthorization(t *testing.T) {
 				t.Error("refresh did not use the current refresh token")
 			}
 			time.Sleep(100 * time.Millisecond)
-			fmt.Fprintf(w, `{"access_token":"access-refreshed-%d","refresh_token":"refresh-rotated-%d","expires_in":3600,"token_type":"Bearer"}`, n, n)
+			_, _ = fmt.Fprintf(w, `{"access_token":"access-refreshed-%d","refresh_token":"refresh-rotated-%d","expires_in":3600,"token_type":"Bearer"}`, n, n)
 		case "/revoke":
 			revocations.Add(1)
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -94,18 +94,18 @@ func TestCustomMCPOAuthCallbackRefreshAndReauthorization(t *testing.T) {
 			}
 			switch message.Method {
 			case "initialize":
-				fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}}}}`, message.ID)
+				_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}}}}`, message.ID)
 			case "notifications/initialized":
 				w.WriteHeader(http.StatusAccepted)
 			case "tools/list":
-				fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"tools":[{"name":"echo","inputSchema":{"type":"object"}}]}}`, message.ID)
+				_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"tools":[{"name":"echo","inputSchema":{"type":"object"}}]}}`, message.ID)
 			case "tools/call":
 				if requireScope.Load() {
 					w.Header().Set("WWW-Authenticate", `Bearer error="insufficient_scope", scope="read write"`)
 					w.WriteHeader(http.StatusForbidden)
 					return
 				}
-				fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"content":[]}}`, message.ID)
+				_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"content":[]}}`, message.ID)
 			default:
 				t.Error("unexpected MCP method")
 				w.WriteHeader(http.StatusBadRequest)

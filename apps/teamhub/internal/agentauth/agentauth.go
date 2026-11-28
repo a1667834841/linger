@@ -125,8 +125,7 @@ func (s *Service) AuthorizeInTx(ctx context.Context, tx pgx.Tx, token, action st
 // behind action. Tool search and execution check provider availability after
 // resolving the Agent's grants.
 func (s *Service) actionConfigured(action string) bool {
-	switch action {
-	case "manage_auto_reminders":
+	if action == "manage_auto_reminders" {
 		return s.ConnectedAppsConfigured()
 	}
 	return true

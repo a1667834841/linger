@@ -254,7 +254,7 @@ func (c *Client) discoverResource(ctx context.Context, endpoint string) (resourc
 	if err != nil {
 		return metadata, err
 	}
-	response.Body.Close()
+	_ = response.Body.Close()
 	var challenge map[string]string
 	switch response.StatusCode {
 	case http.StatusUnauthorized:
@@ -433,7 +433,7 @@ func (c *Client) RevokeOAuth(ctx context.Context, client OAuthClient, token, tok
 	form := url.Values{"token": {token}, "token_type_hint": {tokenType}}
 	response, err := c.oauthForm(ctx, client.RevokeURL, client, form)
 	if err == nil {
-		response.Body.Close()
+		_ = response.Body.Close()
 	}
 }
 
